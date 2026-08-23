@@ -1,0 +1,15 @@
+# Production-only overrides — applied ON THE OCI VM with:
+#   docker compose -f compose.yaml -f compose.prod.yaml up -d --wait
+#
+# Requires DOMAIN set in .env and secrets staged by
+# scripts/fetch-vault-secrets.sh into $CAREERPILOT_SECRET_DIR.
+services:
+  caddy:
+    volumes: !override
+      - ./caddy/Caddyfile.production:/etc/caddy/Caddyfile:ro
+      - caddy_data:/data
+      - caddy_config:/config
+
+  # Dev-only debug binds from compose.override.yaml are NOT loaded here;
+  # this file is used without the override, so only Caddy exposes ports,
+  # exactly as ADR-055 requires.

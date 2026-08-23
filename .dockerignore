@@ -1,0 +1,12 @@
+node_modules
+**/node_modules
+.next
+.git
+.github
+docs
+secrets
+coverage
+*.log
+.env
+.env.*
+compose.override.yaml

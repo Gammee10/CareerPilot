@@ -1,0 +1,25 @@
+# Secrets — never commit (ADR-028/056). Local-only dev secrets live in secrets/local/
+secrets/*
+!secrets/README.md
+!secrets/.gitleaks-allowlist.md
+
+# Node
+node_modules/
+dist/
+.next/
+*.tsbuildinfo
+
+# Python
+__pycache__/
+.venv/
+
+# Environment / local state
+.env
+.env.*
+!.env.example
+coverage/
+*.log
+
+# OS / editor
+.DS_Store
+Thumbs.db

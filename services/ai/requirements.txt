@@ -1,0 +1,6 @@
+# CareerPilot internal AI capability (ADR-047/054). Non-public; Phase 1
+# provides the runtime shell + health endpoint only. Purpose-scoped AI tasks
+# arrive in later phases behind the Node-owned background-work path.
+
+fastapi==0.115.*
+uvicorn==0.34.*

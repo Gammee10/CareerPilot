@@ -1,0 +1,206 @@
+# CareerPilot — Docker Compose baseline (ADR-055, ADR-056)
+#
+# Five services + Caddy reverse proxy:
+#   frontend (Next.js), backend (Express), worker (Node background role),
+#   ai (FastAPI, internal only), postgres (system of record).
+#
+# Public surface (ADR-055): only Caddy publishes host ports (80/443) and only
+# the approved frontend/application endpoints are routed. PostgreSQL, the
+# worker, and FastAPI receive no direct public route.
+#
+# Secrets (ADR-056): every secret is injected per-container as a file-mounted
+# Compose secret. No secret values in environment variables, images, or git.
+# File locations come from CAREERPILOT_SECRET_DIR (see .env.example);
+# production populates that directory via scripts/fetch-vault-secrets.sh.
+
+name: careerpilot
+
+networks:
+  edge: {}   # Caddy <-> publicly routed services only
+  core: {}   # PostgreSQL, backend, worker, ai, migrations
+
+volumes:
+  pgdata:
+  caddy_data:
+  caddy_config:
+
+secrets:
+  postgres_password:
+    file: ${CAREERPILOT_SECRET_DIR:-./secrets/local}/postgres_password.txt
+  session_signing_key:
+    file: ${CAREERPILOT_SECRET_DIR:-./secrets/local}/session_signing_key.txt
+  resend_api_key:
+    file: ${CAREERPILOT_SECRET_DIR:-./secrets/local}/resend_api_key.txt
+  gemini_api_key:
+    file: ${CAREERPILOT_SECRET_DIR:-./secrets/local}/gemini_api_key.txt
+
+services:
+  postgres:
+    image: postgres:17-alpine
+    environment:
+      POSTGRES_DB: ${POSTGRES_DB:-careerpilot}
+      POSTGRES_USER: ${POSTGRES_USER:-careerpilot}
+      POSTGRES_PASSWORD_FILE: /run/secrets/postgres_password
+      POSTGRES_INITDB_ARGS: --data-checksums
+    secrets:
+      - postgres_password
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    networks:
+      - core
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U $${POSTGRES_USER} -d $${POSTGRES_DB}"]
+      interval: 5s
+      timeout: 3s
+      retries: 24
+      start_period: 10s
+    restart: unless-stopped
+
+  migrate:
+    build:
+      context: .
+      dockerfile: apps/backend/Dockerfile
+    command: ["npx", "tsx", "src/tools/migrate.ts"]
+    environment:
+      PGHOST: postgres
+      PGPORT: "5432"
+      PGDATABASE: ${POSTGRES_DB:-careerpilot}
+      PGUSER: ${POSTGRES_USER:-careerpilot}
+      MIGRATIONS_DIR: /app/db/migrations
+      LOG_LEVEL: info
+    secrets:
+      - postgres_password
+    networks:
+      - core
+    depends_on:
+      postgres:
+        condition: service_healthy
+    restart: "no"
+
+  backend:
+    build:
+      context: .
+      dockerfile: apps/backend/Dockerfile
+    command: ["npx", "tsx", "src/server.ts"]
+    environment:
+      PORT: "8080"
+      PGHOST: postgres
+      PGPORT: "5432"
+      PGDATABASE: ${POSTGRES_DB:-careerpilot}
+      PGUSER: ${POSTGRES_USER:-careerpilot}
+      LOG_LEVEL: ${LOG_LEVEL:-info}
+      NODE_ENV: ${NODE_ENV:-production}
+    secrets:
+      - postgres_password
+      - session_signing_key
+      - resend_api_key
+    networks:
+      - edge
+      - core
+    healthcheck:
+      test: ["CMD-SHELL", "wget -q -O /dev/null http://127.0.0.1:8080/healthz || exit 1"]
+      interval: 10s
+      timeout: 3s
+      retries: 12
+      start_period: 15s
+    depends_on:
+      migrate:
+        condition: service_completed_successfully
+      postgres:
+        condition: service_healthy
+    restart: unless-stopped
+
+  worker:
+    build:
+      context: .
+      dockerfile: apps/backend/Dockerfile
+    command: ["npx", "tsx", "src/worker/index.ts"]
+    environment:
+      WORKER_HEALTH_PORT: "8081"
+      PGHOST: postgres
+      PGPORT: "5432"
+      PGDATABASE: ${POSTGRES_DB:-careerpilot}
+      PGUSER: ${POSTGRES_USER:-careerpilot}
+      LOG_LEVEL: ${LOG_LEVEL:-info}
+      NODE_ENV: ${NODE_ENV:-production}
+    secrets:
+      - postgres_password
+    networks:
+      - core
+    healthcheck:
+      test: ["CMD-SHELL", "wget -q -O /dev/null http://127.0.0.1:8081/healthz || exit 1"]
+      interval: 10s
+      timeout: 3s
+      retries: 12
+      start_period: 15s
+    depends_on:
+      migrate:
+        condition: service_completed_successfully
+      postgres:
+        condition: service_healthy
+    restart: unless-stopped
+
+  ai:
+    build:
+      context: ./services/ai
+    environment:
+      AI_PORT: "8000"
+      LOG_LEVEL: ${LOG_LEVEL:-info}
+    secrets:
+      - gemini_api_key
+    networks:
+      - core
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request,sys; sys.exit(0 if urllib.request.urlopen('http://127.0.0.1:8000/healthz', timeout=3).status==200 else 1)"]
+      interval: 10s
+      timeout: 5s
+      retries: 12
+      start_period: 10s
+    restart: unless-stopped
+
+  frontend:
+    build:
+      context: ./apps/frontend
+    environment:
+      PORT: "3000"
+      NODE_ENV: production
+      BACKEND_INTERNAL_URL: http://backend:8080
+    networks:
+      - edge
+    healthcheck:
+      test: ["CMD-SHELL", "wget -q -O /dev/null http://127.0.0.1:3000/healthz || exit 1"]
+      interval: 10s
+      timeout: 3s
+      retries: 18
+      start_period: 30s
+    depends_on:
+      backend:
+        condition: service_healthy
+    restart: unless-stopped
+
+  caddy:
+    image: caddy:2-alpine
+    environment:
+      DOMAIN: ${DOMAIN:-}
+    ports:
+      - "80:80"
+      - "443:443"
+    volumes:
+      - ./caddy/Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy_data:/data
+      - caddy_config:/config
+    networks:
+      - edge
+    healthcheck:
+      # Exercises the full public path: Caddy -> backend /api/healthz.
+      test: ["CMD-SHELL", "wget -q -O /dev/null http://127.0.0.1:80/api/healthz || exit 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 12
+      start_period: 10s
+    depends_on:
+      backend:
+        condition: service_healthy
+      frontend:
+        condition: service_healthy
+    restart: unless-stopped

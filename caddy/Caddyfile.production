@@ -1,0 +1,20 @@
+# CareerPilot public entry point — PRODUCTION VM (ADR-055).
+#
+# DOMAIN must be set in the VM's .env; Caddy obtains/renews Let's Encrypt
+# certificates automatically. Only approved endpoints are routed.
+#
+# Deployed on the VM via: docker compose -f compose.yaml -f compose.prod.yaml up -d
+
+{$DOMAIN} {
+	encode zstd gzip
+
+	# Authoritative application API (prefix stripped before proxying).
+	handle_path /api/* {
+		reverse_proxy backend:8080
+	}
+
+	# Everything else: dashboard frontend.
+	handle {
+		reverse_proxy frontend:3000
+	}
+}

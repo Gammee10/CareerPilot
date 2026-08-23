@@ -1,0 +1,20 @@
+# CareerPilot public entry point — LOCAL DEVELOPMENT (ADR-055).
+#
+# Listens on plain HTTP :80 (the dev override binds it to 127.0.0.1:8080).
+# Only approved endpoints are routed: /api/* -> backend, rest -> frontend.
+#
+# Production uses caddy/Caddyfile.production via compose.prod.yaml.
+
+:80 {
+	encode zstd gzip
+
+	# Authoritative application API (prefix stripped before proxying).
+	handle_path /api/* {
+		reverse_proxy backend:8080
+	}
+
+	# Everything else: dashboard frontend.
+	handle {
+		reverse_proxy frontend:3000
+	}
+}
