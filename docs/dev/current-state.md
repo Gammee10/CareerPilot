@@ -1,10 +1,27 @@
 # Current State
 
-Last updated: 2026-08-23 (Phase 2 implementation session)
+Last updated: 2026-08-23 (Phase 3 implementation session)
+
+## Preconditions Status (recorded evidence)
+
+1. **Gemini unpaid-tier terms vs ADR-060: VERIFIED 2026-08-23, MATCH.** Current Gemini API Additional Terms confirm the recorded unpaid-services data use (provider use of submitted content/responses for product improvement incl. ML; possible human review, disconnected from account/key; sensitive/personal info prohibited by Google). Two operational notes recorded: EEA/CH/UK traffic automatically receives Paid-Services data terms; since 2026-06-19 unrestricted API keys are rejected — production keys must be restricted. No re-review trigger.
+2. **Source adapter terms (T4.0): still open** — required before Phase 4 adapter use.
+
+## Phase 3 Implementation Map
+
+- `db/migrations/0003_profile.sql` — resume_upload_grants (short-lived single-use scoped upload/download authorizations).
+- `storage/objectStore.ts` — ObjectStore interface; InMemoryObjectStore for dev/tests; S3-compatible production driver deferred to Phase 8 wiring with real OCI tenancy + file-mounted credentials (surfaced to decision maker — no new container added).
+- `profile/resumes.ts` — grant creation/claiming (atomic single-use), type/size allowlist (text/pdf/docx ≤10MB), metadata-only DB rows, SHA-256, internal random storage keys never exposed.
+- `profile/minimization.ts` — deterministic redaction (emails, phones, URLs, filenames, UUIDs, known names/account ids) + assertMinimized post-condition before any provider payload is built.
+- `profile/extraction.ts` — idempotent work unit (`extraction:{docId}:{hash}` in idempotency_records); text-only extraction; AI failure/malformed output → truthful failure, nothing persisted. Interim direct invocation post-upload; pg-boss delivery arrives T5.1.
+- `profile/proposal.ts` — strict Node-side proposal validation (unknown fields rejected).
+- `profile/drafts.ts` — edit (ready-only, revalidated) / accept (creates immutable version + links draft) / discard; manual path needs no resume.
+- `profile/profileVersions.ts` — numbered immutable snapshots, current-profile resolution, hard-constraint/preference classification validation with strict-toggle rule.
+- FastAPI `/extract` endpoint: receives only minimized task content, calls Gemini when key file present, returns raw untrusted proposal (validation is Node-side); no request/response content logged.
 
 ## CI
 
-`.github/workflows/ci.yml` runs on pushes to `main` and PRs: backend lint+typecheck; frontend lint+typecheck+build; ai ruff + import smoke test; identity capability integration tests (Postgres service container); compose config validation + schema tests. npm lockfiles committed for reproducible `npm ci`.
+`.github/workflows/ci.yml`: backend lint+typecheck; frontend lint+typecheck+build; ai ruff+import smoke; identity/profile integration tests (Postgres service container); compose config validation + schema tests.
 
 ## Phase 2 Implementation Map (all under apps/backend/src)
 
@@ -83,4 +100,4 @@ Local stack runs healthy via `powershell -File scripts/dev-up.ps1`
 
 ## Next Step
 
-Phase 3 (T3.1–T3.4): resume upload to private Object Storage via short-lived scoped authorization, FastAPI extraction behind the Node-owned background path with ADR-054 minimization, reviewable draft workflow, immutable profile versions with hard-constraint/preference classification. NOTE: T3.2 touches the Gemini precondition — verify current Gemini unpaid-tier terms against ADR-060 before enabling any AI feature; OCI Object Storage credentials also needed for T3.1.
+Phase 4 (T4.0–T4.6): FIRST record Greenhouse/Lever/RemoteOK current-API-terms validations (blocking precondition), then adapters emitting provenance-preserving observations, normalization/canonicalization/availability stages, material-change detection, application-link selection. Requires job_sources.terms_validation_* records before any adapter's first use.

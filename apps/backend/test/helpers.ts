@@ -2,6 +2,8 @@ import type { Express } from "express";
 import { Pool } from "pg";
 import { buildApp } from "../src/app.js";
 import { CaptureMailer } from "../src/notify/mailer.js";
+import type { ObjectStore } from "../src/storage/objectStore.js";
+import type { AiClient } from "../src/profile/aiClient.js";
 import { testDbConfig } from "./global-setup.js";
 
 export const TEST_DB = "careerpilot_test";
@@ -25,10 +27,18 @@ export type Harness = {
   close: () => Promise<void>;
 };
 
-export function makeHarness(now: () => Date = () => new Date()): Harness {
+export type HarnessOptions = {
+  store?: ObjectStore;
+  ai?: AiClient;
+};
+
+export function makeHarness(
+  now: () => Date = () => new Date(),
+  options: HarnessOptions = {}
+): Harness {
   const db = makeTestPool();
   const mailer = new CaptureMailer();
-  const app = buildApp({ db, mailer, now });
+  const app = buildApp({ db, mailer, now, ...options });
   return {
     db,
     mailer,
@@ -92,6 +102,20 @@ export const HOUR_MS = 60 * MINUTE_MS;
 export const DAY_MS = 24 * HOUR_MS;
 
 // Convenience: activate a user through the real invitation path.
+// Test-only AI client: captures exactly what would leave CareerPilot and
+// returns a canned proposal (or throws) per the scenario.
+export class RecordingAiClient {
+  sentTasks: unknown[] = [];
+  constructor(private response: () => unknown) {}
+
+  async requestExtraction(task: unknown): Promise<unknown> {
+    this.sentTasks.push(task);
+    const value = this.response();
+    if (value instanceof Error) throw value;
+    return value;
+  }
+}
+
 export async function createActiveUser(
   h: Harness,
   email: string,

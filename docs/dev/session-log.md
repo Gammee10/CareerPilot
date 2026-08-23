@@ -4,6 +4,18 @@ Newest entries first. Append-only — never delete or rewrite prior entries.
 
 ---
 
+## 2026-08-23 - Phase 3 (T3.1-T3.4) implemented and verified
+
+**Done:** Resume intake via short-lived single-use scoped grants (migration 0003 resume_upload_grants; type/size allowlist; metadata-only rows with SHA-256; internal random storage keys). Extraction pipeline per ADR-054: deterministic redaction + assertMinimized post-condition before any provider payload; strict Node-side proposal validation (unknown fields rejected, nothing persisted on malformed output); idempotent work unit via idempotency_records. Draft workflow: edit-while-ready / accept creates immutable linked profile version / discard; manual completion path without resume. Profile versions: numbered immutable snapshots (ADR-005), current-profile resolution, hard-constraint/preference classification with mandatory strict toggles. FastAPI /extract endpoint (Gemini call behind key file, raw untrusted proposal passthrough). Routes ownership-guarded under requireSelf.
+
+**Precondition executed:** Gemini unpaid-tier terms verified against ADR-060 - MATCH (recorded in current-state.md with two operational notes: EEA/CH/UK paid-tier data terms apply automatically; API keys must be restricted since 2026-06-19).
+
+**Verified:** vitest 9 files ALL PASSING (Phase 2's 48 tests plus new storage/extraction/profile-drafts suites covering every T3.x AC incl. identifier-redaction proof of provider payloads); backend lint+typecheck clean; FastAPI ruff+import smoke OK.
+
+**Deviations surfaced:** (1) Production S3-compatible object-store driver deferred to Phase 8 wiring - no OCI tenancy or credentials exist yet; dev/tests use an InMemoryObjectStore behind the same interface. No new container/service added to the approved Compose baseline. Flag for decision maker if earlier wiring is desired. (2) Extraction runs synchronously post-upload as the idempotent work unit until pg-boss durable delivery lands in T5.1 (per plan sequencing).
+
+**Next step:** Phase 4 (T4.0 terms validations first, then adapters and shared job pipeline).
+
 ## 2026-08-23 - Phase 2 (T2.1-T2.6) implemented and verified
 
 **Done:** Identity capability in apps/backend/src/identity: invitation lifecycle (issue/revoke/accept/lazy-expire, 14-day validity, activation creates account), passwordless sign-in links (opaque hash-only tokens, 15-min TTL, confirmation-before-redemption two-step, single-use, rate limits 3/15min + 10/24h per email, prior-unused invalidation, non-disclosing failures everywhere), sessions (user 30d/7d, admin 12h/1h, idle refresh, immediate revocation on suspension/closure/admin-removal), account state machine (closure terminal; failure audits persisted outside rolled-back transactions), dual-controlled admin role changes (self-approval refused+audited, last-admin guard, bootstrap procedure ops/bootstrap-admin.md), deny-by-default middleware with requireSelf ownership checks (404 for cross-account) over six user-scoped resource routes. Migration 0002_identity.sql adds accounts.is_admin + signin_links. 48 vitest integration tests in 6 suites; CI job 'identity' added.

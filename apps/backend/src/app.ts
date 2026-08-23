@@ -27,11 +27,29 @@ import {
   suspendAccount
 } from "./identity/accounts.js";
 import type { Mailer } from "./notify/mailer.js";
+import { buildObjectStore, type ObjectStore } from "./storage/objectStore.js";
+import { HttpAiClient, type AiClient } from "./profile/aiClient.js";
+import {
+  completeUpload,
+  createDownloadGrant,
+  createUploadGrant,
+  downloadWithGrant
+} from "./profile/resumes.js";
+import { runExtraction } from "./profile/extraction.js";
+import {
+  acceptDraft,
+  discardDraft,
+  editDraft,
+  listDrafts
+} from "./profile/drafts.js";
+import { getCurrentProfile, saveProfileVersion } from "./profile/profileVersions.js";
 
 export type AppDeps = {
   db: Pool;
   mailer: Mailer;
   now?: () => Date;
+  store?: ObjectStore;
+  ai?: AiClient;
 };
 
 const GENERIC_LINK_FAILURE = { error: "invalid_link" };
@@ -47,6 +65,8 @@ function setSessionCookie(res: Response, token: string): void {
 export function buildApp(deps: AppDeps): Express {
   const { db, mailer } = deps;
   const nowFn = deps.now ?? (() => new Date());
+  const store = deps.store ?? buildObjectStore();
+  const ai: AiClient = deps.ai ?? new HttpAiClient(process.env.AI_INTERNAL_URL ?? "http://ai:8000");
   const app = express();
   app.disable("x-powered-by");
   app.use(express.json());
@@ -175,6 +195,222 @@ export function buildApp(deps: AppDeps): Express {
       }
     );
   }
+
+  // ------------------------------------------------------------------
+  // Profile & resume processing routes (Phase 3). Ownership-guarded;
+  // artifact bytes move only through short-lived single-use grants.
+  // ------------------------------------------------------------------
+
+  app.post(
+    "/api/account/:accountId/resume/upload-grant",
+    requireSession(db, nowFn),
+    requireSelf("accountId"),
+    async (req, res) => {
+      const grant = await createUploadGrant(db, req.auth!.accountId, nowFn());
+      res.status(201).json({ token: grant.token, expiresAt: grant.expiresAt.toISOString() });
+    }
+  );
+
+  // Token-scoped upload: the grant itself authorizes this request.
+  app.put("/api/resume/upload/:grantToken", express.raw({ type: () => true, limit: "11mb" }), async (req, res) => {
+    const contentType = String(req.headers["content-type"] ?? "").split(";")[0];
+    const body = Buffer.isBuffer(req.body) ? req.body : Buffer.from(req.body ?? "");
+    const result = await completeUpload(
+      db,
+      store,
+      String(req.params.grantToken),
+      body,
+      contentType,
+      nowFn()
+    );
+    if (!result.ok) {
+      const code = result.reason === "invalid_grant" ? 403 : 415;
+      res.status(code).json({ error: result.reason });
+      return;
+    }
+    await runExtraction(db, store, ai, result.resumeDocumentId, nowFn());
+    res.status(201).json({ resumeDocumentId: result.resumeDocumentId });
+  });
+
+  app.post(
+    "/api/account/:accountId/resume/:documentId/download-grant",
+    requireSession(db, nowFn),
+    requireSelf("accountId"),
+    async (req, res) => {
+      const result = await createDownloadGrant(
+        db,
+        req.auth!.accountId,
+        String(req.params.documentId),
+        nowFn()
+      );
+      if (!result.ok) {
+        res.status(404).json({ error: "not_found" });
+        return;
+      }
+      res.status(201).json({ token: result.token, expiresAt: result.expiresAt.toISOString() });
+    }
+  );
+
+  app.get("/api/resume/download/:grantToken", async (req, res) => {
+    const result = await downloadWithGrant(db, store, String(req.params.grantToken), nowFn());
+    if (!result.ok) {
+      res.status(403).json({ error: "invalid_grant" });
+      return;
+    }
+    res.setHeader("content-type", result.contentType);
+    res.status(200).send(result.body);
+  });
+
+  app.get(
+    "/api/account/:accountId/resume",
+    requireSession(db, nowFn),
+    requireSelf("accountId"),
+    async (req, res) => {
+      const rows = await db.query(
+        `SELECT id, content_type, byte_size, uploaded_at, superseded_at, deleted_at
+           FROM resume_documents WHERE account_id = $1 ORDER BY uploaded_at DESC`,
+        [req.auth!.accountId]
+      );
+      res.json({ documents: rows.rows });
+    }
+  );
+
+  app.post(
+    "/api/account/:accountId/resume/:documentId/extract",
+    requireSession(db, nowFn),
+    requireSelf("accountId"),
+    async (req, res) => {
+      const result = await runExtraction(
+        db,
+        store,
+        ai,
+        String(req.params.documentId),
+        nowFn()
+      );
+      if (!result.ok) {
+        res.status(result.reason === "document_not_found" ? 404 : 422)
+          .json({ error: result.reason });
+        return;
+      }
+      res.status(result.reusedExisting ? 200 : 202).json({
+        draftId: result.draftId,
+        reusedExisting: result.reusedExisting
+      });
+    }
+  );
+
+  app.get(
+    "/api/account/:accountId/extraction-drafts",
+    requireSession(db, nowFn),
+    requireSelf("accountId"),
+    async (req, res) => {
+      const drafts = await listDrafts(db, req.auth!.accountId);
+      res.json({ drafts });
+    }
+  );
+
+  app.patch(
+    "/api/account/:accountId/extraction-drafts/:draftId",
+    requireSession(db, nowFn),
+    requireSelf("accountId"),
+    async (req, res) => {
+      const result = await editDraft(
+        db,
+        req.auth!.accountId,
+        String(req.params.draftId),
+        req.body?.proposed_content,
+        nowFn()
+      );
+      if (!result.ok) {
+        const code =
+          result.reason === "not_found" ? 404 :
+          result.reason === "not_editable" ? 409 : 422;
+        res.status(code).json({ error: result.reason });
+        return;
+      }
+      res.status(200).json({ status: "edited" });
+    }
+  );
+
+  app.post(
+    "/api/account/:accountId/extraction-drafts/:draftId/accept",
+    requireSession(db, nowFn),
+    requireSelf("accountId"),
+    async (req, res) => {
+      const result = await acceptDraft(db, req.auth!.accountId, String(req.params.draftId), nowFn());
+      if (!result.ok) {
+        const code =
+          result.reason === "not_found" ? 404 :
+          result.reason === "not_editable" ? 409 : 422;
+        res.status(code).json({ error: result.reason });
+        return;
+      }
+      res.status(200).json({
+        profileVersionId: result.profileVersionId,
+        versionNumber: result.versionNumber
+      });
+    }
+  );
+
+  app.post(
+    "/api/account/:accountId/extraction-drafts/:draftId/discard",
+    requireSession(db, nowFn),
+    requireSelf("accountId"),
+    async (req, res) => {
+      const ok = await discardDraft(db, req.auth!.accountId, String(req.params.draftId), nowFn());
+      if (!ok) {
+        res.status(409).json({ error: "not_discardable" });
+        return;
+      }
+      res.status(200).json({ status: "discarded" });
+    }
+  );
+
+  app.post(
+    "/api/account/:accountId/profile/save",
+    requireSession(db, nowFn),
+    requireSelf("accountId"),
+    async (req, res) => {
+      const source = req.body?.source === "extraction_draft" ? "extraction_draft" : "manual";
+      const result = await saveProfileVersion(db, req.auth!.accountId, req.body?.content, source, nowFn());
+      if (!result.ok) {
+        res.status(422).json({ error: result.reason });
+        return;
+      }
+      res.status(201).json({
+        profileVersionId: result.profileVersionId,
+        versionNumber: result.versionNumber
+      });
+    }
+  );
+
+  app.get(
+    "/api/account/:accountId/profile/current",
+    requireSession(db, nowFn),
+    requireSelf("accountId"),
+    async (req, res) => {
+      const current = await getCurrentProfile(db, req.auth!.accountId);
+      if (!current) {
+        res.status(404).json({ error: "no_profile" });
+        return;
+      }
+      res.json(current);
+    }
+  );
+
+  app.get(
+    "/api/account/:accountId/profile/versions",
+    requireSession(db, nowFn),
+    requireSelf("accountId"),
+    async (req, res) => {
+      const rows = await db.query(
+        `SELECT id, version_number, source, saved_at FROM profile_versions
+          WHERE account_id = $1 ORDER BY version_number DESC`,
+        [req.auth!.accountId]
+      );
+      res.json({ versions: rows.rows });
+    }
+  );
 
   // ------------------------------------------------------------------
   // Administration routes (least privilege per ADR-016).
