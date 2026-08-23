@@ -15,7 +15,9 @@ export function makeTestPool(): Pool {
 export async function resetDb(pool: Pool): Promise<void> {
   await pool.query(
     `TRUNCATE accounts, invitations, sessions, signin_links,
-              administrator_role_changes, audit_events
+              administrator_role_changes, audit_events,
+              canonical_jobs, source_listings, availability_history,
+              canonical_job_reconciliations
       RESTART IDENTITY CASCADE`
   );
 }

@@ -2,7 +2,7 @@ import fs from "node:fs";
 import path from "node:path";
 import { Pool } from "pg";
 
-const TEST_DB = "careerpilot_test";
+export const TEST_DB = "careerpilot_test";
 
 function password(): string {
   // CI service containers provide a throwaway password via env; local runs

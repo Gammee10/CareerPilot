@@ -1,11 +1,21 @@
 # Current State
 
-Last updated: 2026-08-23 (Phase 3 implementation session)
+Last updated: 2026-08-23 (Phase 4 implementation session)
 
 ## Preconditions Status (recorded evidence)
 
-1. **Gemini unpaid-tier terms vs ADR-060: VERIFIED 2026-08-23, MATCH.** Current Gemini API Additional Terms confirm the recorded unpaid-services data use (provider use of submitted content/responses for product improvement incl. ML; possible human review, disconnected from account/key; sensitive/personal info prohibited by Google). Two operational notes recorded: EEA/CH/UK traffic automatically receives Paid-Services data terms; since 2026-06-19 unrestricted API keys are rejected — production keys must be restricted. No re-review trigger.
-2. **Source adapter terms (T4.0): still open** — required before Phase 4 adapter use.
+1. **Gemini terms vs ADR-060: VERIFIED 2026-08-23, MATCH** (see Phase 3 entry).
+2. **Source adapter terms (T4.0): RECORDED 2026-08-23** — `docs/dev/source-terms.md` + `job_sources.terms_validation_*` set by migration 0004 for greenhouse/lever/remoteok. Key obligations: RemoteOK requires source attribution + DIRECT link back (stored as `remoteok_attribution_direct_link` restriction on every observation; display surfaces must render it before beta launch); Lever/Greenhouse public reads are unrestricted but conservatively rate-limited (~1 req/s) by our client.
+
+## Phase 4 Implementation Map
+
+- `db/migrations/0004_sources.sql` — change_classification column, strong_match_key + index, T4.0 validation records.
+- `sources/contract.ts` — observation contract + `validateSourceObservation` (normalization-stage validation, ADR-012) + `materialFingerprint` (hash over material fields only).
+- `sources/politeClient.ts` — PoliteClient: sustained ~1 req/s rate, ≤3 attempts (ADR-044), Retry-After honored (capped), non-transient failures never retried; `collectPages` page-budget helper.
+- `sources/adapters.ts` — greenhouse/lever/remoteok adapters emitting provenance-preserving observations; RemoteOK skips legal element, stores direct-link obligation.
+- `sources/registry.ts` — buildAdapter + checkCollectionAllowed (unknown/disabled/terms-not-validated gates BEFORE any request; independently disableable).
+- `sources/pipeline.ts` — persistObservation (normalize → listing identity upsert → duplicate guard scoped to same run+hash+signal → classification initial/material/non_material → derived current-view update only on material); ensureCanonicalJob (strong key company|title|location; ambiguous→separate candidate, ADR-006); recordMerge (non-destructive reconciliation, evaluations untouched); computeAvailabilityState/refreshAvailability (explicit signals only, freshness windows per source, history rows on transitions only).
+- `sources/links.ts` — selectApplicationLinks (employer ATS preferred, alternatives retained).
 
 ## Phase 3 Implementation Map
 
@@ -100,4 +110,4 @@ Local stack runs healthy via `powershell -File scripts/dev-up.ps1`
 
 ## Next Step
 
-Phase 4 (T4.0–T4.6): FIRST record Greenhouse/Lever/RemoteOK current-API-terms validations (blocking precondition), then adapters emitting provenance-preserving observations, normalization/canonicalization/availability stages, material-change detection, application-link selection. Requires job_sources.terms_validation_* records before any adapter's first use.
+Phase 5 (T5.1–T5.7): pg-boss durable queues with approved policies (idempotency, supersession, active-account checks), per-user time-zone daily scheduling, guarded manual refresh (~6 h), coalescing, partial-run truthfulness, bounded retry wiring for source attempts, suspension/closure work stoppage.

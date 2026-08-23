@@ -4,6 +4,16 @@ Newest entries first. Append-only — never delete or rewrite prior entries.
 
 ---
 
+## 2026-08-23 - Phase 4 (T4.0-T4.6) implemented and verified
+
+**Done:** T4.0 precondition executed: current-API-terms validated and recorded for greenhouse/lever/remoteok in docs/dev/source-terms.md + job_sources columns via migration 0004 (RemoteOK binding obligations: attribution + direct link back, stored as observation restrictions). Adapter layer: PoliteClient (~1 req/s sustained rate, <=3 attempts per ADR-044 with Retry-After honored/capped, non-transient failures never retried, injectable transport+clock), page-budget pagination helper, three adapters emitting contract observations with provenance/restrictions, registry gating collection on enabled+terms-validated BEFORE any request. Pipeline: normalization validation with recorded rejections; idempotent observation persistence scoped to run+hash+signal with initial/material/non_material classification; conservative canonicalization on strong company|title|location key (ambiguous -> separate candidate); non-destructive merge reconciliation records preserving historical evaluations; evidence-weighted availability (explicit signals only, absence never marks unavailable, freshness windows -> stale/uncertain, restored transitions); employer-ATS-preferred link selection.
+
+**Verified:** vitest 11 files / 97 tests ALL PASSING, covering every T4.x AC: disable test shows zero requests, terms gate blocks unvalidated sources, rate/page-budget/Retry-After/non-retry assertions, malformed observation rejection with audit record, cross-source canonical convergence vs separation, merge preserves evaluation identity, all four availability states + restore, non-material change produces no material trigger.
+
+**Deviations surfaced:** none architectural. Defects found by tests: duplicate-suppression wrongly swallowed fresh observations across runs / ignored availability signal - dedupe now scoped to same run+hash+signal; resetDb now also truncates shared job tables; restored-transition reason semantics fixed.
+
+**Next step:** Phase 5 (T5.1-T5.7): pg-boss durable background work with approved policies.
+
 ## 2026-08-23 - Phase 3 (T3.1-T3.4) implemented and verified
 
 **Done:** Resume intake via short-lived single-use scoped grants (migration 0003 resume_upload_grants; type/size allowlist; metadata-only rows with SHA-256; internal random storage keys). Extraction pipeline per ADR-054: deterministic redaction + assertMinimized post-condition before any provider payload; strict Node-side proposal validation (unknown fields rejected, nothing persisted on malformed output); idempotent work unit via idempotency_records. Draft workflow: edit-while-ready / accept creates immutable linked profile version / discard; manual completion path without resume. Profile versions: numbered immutable snapshots (ADR-005), current-profile resolution, hard-constraint/preference classification with mandatory strict toggles. FastAPI /extract endpoint (Gemini call behind key file, raw untrusted proposal passthrough). Routes ownership-guarded under requireSelf.
