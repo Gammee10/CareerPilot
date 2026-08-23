@@ -1,17 +1,29 @@
 # Current State
 
-Last updated: 2026-08-23 (CI workflow session, Phase 2 prep)
+Last updated: 2026-08-23 (Phase 2 implementation session)
 
 ## CI
 
-`.github/workflows/ci.yml` runs on pushes to `main` and PRs: backend lint+typecheck; frontend lint+typecheck+build; ai ruff + import smoke test; compose config validation + schema tests. npm lockfiles committed for reproducible `npm ci`. All job commands verified locally before push.
+`.github/workflows/ci.yml` runs on pushes to `main` and PRs: backend lint+typecheck; frontend lint+typecheck+build; ai ruff + import smoke test; identity capability integration tests (Postgres service container); compose config validation + schema tests. npm lockfiles committed for reproducible `npm ci`.
+
+## Phase 2 Implementation Map (all under apps/backend/src)
+
+- `identity/tokens.ts` — opaque base64url tokens, SHA-256 hash-only persistence.
+- `identity/invitations.ts` — issue/revoke/accept/lazy-expire (14-day validity); acceptance creates the account (activation) and is idempotent per ADR-025.
+- `identity/signinLinks.ts` — request (rate limits 3/15min + 10/24h per email, prior-unused invalidation), confirm (non-consuming), redeem (single-use, 15-min TTL, requires prior confirmation). All failures non-disclosing.
+- `identity/sessions.ts` — user 30d absolute/7d idle; admin 12h/1h; idle refresh on validation; revocation on suspension/closure/admin-authority removal.
+- `identity/accounts.ts` — active<->suspended<->closed state machine, closure terminal, timestamps cleared on transitions, failure audits persisted outside aborted transactions.
+- `identity/adminRoles.ts` — dual-control initiate/approve; self-approval refused+audited; last-admin guard; executed revoke strips privileged sessions immediately.
+- `middleware/auth.ts` — deny-by-default requireSession / requireAdmin / requireSelf (404 for cross-account to avoid existence disclosure).
+- `app.ts` — route surface: public auth endpoints, `/api/me`, six user-scoped resource routes (ownership-guarded placeholders for later phases), admin invitation/account/role-change routes. Bootstrap procedure: `ops/bootstrap-admin.md` + `scripts/bootstrap-admin.sql` (audit-recorded).
+- Tests: `apps/backend/test/*.test.ts` (vitest, 48 tests) against disposable `careerpilot_test` DB; CI job `identity`.
 
 ## Phase Status
 
 | Phase | Status |
 |---|---|
 | 1 — Foundation | Complete (T1.1–T1.4 verified; see session log) |
-| 2 — Identity, Invitations, Sessions | Not started |
+| 2 — Identity, Invitations, Sessions | Complete (T2.1–T2.6 implemented; 48 vitest integration tests passing) |
 | 3 — Profile and Resume Processing | Not started |
 | 4 — Source Adapters and Shared Job Pipeline | Not started (T4.0 terms validation is a blocking precondition) |
 | 5 — Discovery Orchestration and Background Work | Not started |
@@ -71,4 +83,4 @@ Local stack runs healthy via `powershell -File scripts/dev-up.ps1`
 
 ## Next Step
 
-Awaiting decision-maker go-ahead, then Phase 2 (T2.1–T2.6): invitation lifecycle, passwordless links, sessions, account states, dual-control admin changes, deny-by-default authorization middleware — building on the schema tables already in place.
+Phase 3 (T3.1–T3.4): resume upload to private Object Storage via short-lived scoped authorization, FastAPI extraction behind the Node-owned background path with ADR-054 minimization, reviewable draft workflow, immutable profile versions with hard-constraint/preference classification. NOTE: T3.2 touches the Gemini precondition — verify current Gemini unpaid-tier terms against ADR-060 before enabling any AI feature; OCI Object Storage credentials also needed for T3.1.

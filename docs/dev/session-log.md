@@ -4,6 +4,18 @@ Newest entries first. Append-only — never delete or rewrite prior entries.
 
 ---
 
+## 2026-08-23 - Phase 2 (T2.1-T2.6) implemented and verified
+
+**Done:** Identity capability in apps/backend/src/identity: invitation lifecycle (issue/revoke/accept/lazy-expire, 14-day validity, activation creates account), passwordless sign-in links (opaque hash-only tokens, 15-min TTL, confirmation-before-redemption two-step, single-use, rate limits 3/15min + 10/24h per email, prior-unused invalidation, non-disclosing failures everywhere), sessions (user 30d/7d, admin 12h/1h, idle refresh, immediate revocation on suspension/closure/admin-removal), account state machine (closure terminal; failure audits persisted outside rolled-back transactions), dual-controlled admin role changes (self-approval refused+audited, last-admin guard, bootstrap procedure ops/bootstrap-admin.md), deny-by-default middleware with requireSelf ownership checks (404 for cross-account) over six user-scoped resource routes. Migration 0002_identity.sql adds accounts.is_admin + signin_links. 48 vitest integration tests in 6 suites; CI job 'identity' added.
+
+**Verified:** npx vitest run: 6 files / 48 tests ALL PASSING against disposable careerpilot_test DB; backend lint+typecheck clean; full compose stack healthy after fixes.
+
+**Deviations surfaced:** none architectural. Implementation defects found by tests and fixed: (a) setState COALESCE kept stale suspended_at/closed_at violating CHECK equality on transitions out of those states - timestamps now cleared explicitly; (b) invalid-transition audit events were written inside the aborted transaction and vanished - now recorded after rollback; (c) app rewrite had dropped /healthz + /readyz endpoints - restored. Test-side fixes: helper signature misuse, fixed-clock for HTTP tests, correct last-admin scenario construction.
+
+**Next step:** Phase 3 (T3.1-T3.4). Before T3.2 AI work: verify current Gemini unpaid-tier terms vs ADR-060. T3.1 needs OCI Object Storage credentials.
+
+---
+
 ## 2026-08-23 — CI workflow added (Phase 2 prep)
 
 **Done:** Added `.github/workflows/ci.yml` (runs on push to main + PRs) with four jobs: backend lint+typecheck; frontend lint+typecheck+build; ai capability ruff + byte-compile/import smoke test; stack-tests job validating Compose base/prod configs and running `scripts/test-schema.sh`. Committed npm lockfiles for reproducible `npm ci`; added ESLint flat configs and `lint`/`typecheck` scripts to both TS apps; added `services/ai/pyproject.toml` with ruff config. Fixed a real typing bug in `apps/backend/src/server.ts` found by the new typecheck (`process.env.PORT ?? 8080` not narrowed — now uses `config.port`). Added generated `apps/frontend/next-env.d.ts` to `.gitignore`.

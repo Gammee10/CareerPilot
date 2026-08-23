@@ -1,29 +1,9 @@
-import express from "express";
 import { config } from "./config.js";
-import { pingDatabase } from "./db.js";
+import { getPool } from "./db.js";
+import { buildApp } from "./app.js";
+import { LoggingMailer } from "./notify/mailer.js";
 
-const app = express();
-app.disable("x-powered-by");
-
-// Liveness: process is up. No dependency checks, no sensitive detail.
-app.get("/healthz", (_req, res) => {
-  res.status(200).json({ status: "ok" });
-});
-
-// Readiness: authoritative datastore reachable.
-app.get("/readyz", async (_req, res) => {
-  try {
-    const ok = await pingDatabase();
-    res.status(ok ? 200 : 503).json({ status: ok ? "ready" : "degraded" });
-  } catch {
-    res.status(503).json({ status: "unavailable" });
-  }
-});
-
-// All real routes arrive in later phases; unknown routes fail closed.
-app.use((_req, res) => {
-  res.status(404).json({ error: "not_found" });
-});
+const app = buildApp({ db: getPool(), mailer: new LoggingMailer() });
 
 const server = app.listen(config.port, "0.0.0.0", () => {
   console.log(JSON.stringify({

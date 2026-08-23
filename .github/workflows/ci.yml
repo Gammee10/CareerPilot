@@ -67,6 +67,47 @@ jobs:
           python -m compileall services/ai/main.py
           cd services/ai && python -c "import main"
 
+  identity:
+    name: Identity capability tests (T2.x)
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: apps/backend
+    services:
+      postgres:
+        image: postgres:17-alpine
+        env:
+          POSTGRES_USER: careerpilot
+          POSTGRES_PASSWORD: careerpilot-ci
+          POSTGRES_DB: careerpilot
+        ports:
+          - 5433:5432
+        options: >-
+          --health-cmd "pg_isready -U careerpilot"
+          --health-interval 5s
+          --health-timeout 3s
+          --health-retries 20
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: apps/backend/package-lock.json
+      - name: Install dependencies
+        run: npm ci --no-audit --no-fund
+      - name: Lint + typecheck
+        run: |
+          npm run lint
+          npm run typecheck
+      - name: Run identity integration tests
+        env:
+          PGHOST: localhost
+          PGPORT: 5433
+          PGUSER: careerpilot
+          CI_TEST_PASSWORD: careerpilot-ci
+        run: npx vitest run
+
   stack-tests:
     name: Compose validation + schema tests
     runs-on: ubuntu-latest
