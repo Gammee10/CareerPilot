@@ -1,6 +1,18 @@
-# Session Log
+﻿# Session Log
 
 Newest entries first. Append-only — never delete or rewrite prior entries.
+
+---
+
+## 2026-08-23 — CI workflow added (Phase 2 prep)
+
+**Done:** Added `.github/workflows/ci.yml` (runs on push to main + PRs) with four jobs: backend lint+typecheck; frontend lint+typecheck+build; ai capability ruff + byte-compile/import smoke test; stack-tests job validating Compose base/prod configs and running `scripts/test-schema.sh`. Committed npm lockfiles for reproducible `npm ci`; added ESLint flat configs and `lint`/`typecheck` scripts to both TS apps; added `services/ai/pyproject.toml` with ruff config. Fixed a real typing bug in `apps/backend/src/server.ts` found by the new typecheck (`process.env.PORT ?? 8080` not narrowed — now uses `config.port`). Added generated `apps/frontend/next-env.d.ts` to `.gitignore`.
+
+**Verified:** Every CI job's exact command sequence executed successfully locally: backend/frontend via npm; ai job inside a `python:3.12-slim` container (`ruff check`, compileall, import); compose config validation (base + prod) and full schema suite via Git Bash. Push triggers the first real GitHub Actions run.
+
+**Deviations surfaced:** none. Dev-tooling only; no runtime architecture changes.
+
+**Next step:** Awaiting decision-maker go-ahead for Phase 2 (T2.1–T2.6).
 
 ---
 

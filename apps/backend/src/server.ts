@@ -1,4 +1,5 @@
 import express from "express";
+import { config } from "./config.js";
 import { pingDatabase } from "./db.js";
 
 const app = express();
@@ -24,11 +25,11 @@ app.use((_req, res) => {
   res.status(404).json({ error: "not_found" });
 });
 
-const server = app.listen(process.env.PORT ?? 8080, "0.0.0.0", () => {
+const server = app.listen(config.port, "0.0.0.0", () => {
   console.log(JSON.stringify({
     event: "backend_listening",
     // Port only — no hostnames, credentials, or user data (ADR-015).
-    port: Number(process.env.PORT ?? 8080)
+    port: config.port
   }));
 });
 

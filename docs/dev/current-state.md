@@ -1,6 +1,10 @@
 # Current State
 
-Last updated: 2026-08-23 (Phase 1 implementation session)
+Last updated: 2026-08-23 (CI workflow session, Phase 2 prep)
+
+## CI
+
+`.github/workflows/ci.yml` runs on pushes to `main` and PRs: backend lint+typecheck; frontend lint+typecheck+build; ai ruff + import smoke test; compose config validation + schema tests. npm lockfiles committed for reproducible `npm ci`. All job commands verified locally before push.
 
 ## Phase Status
 
@@ -67,6 +71,4 @@ Local stack runs healthy via `powershell -File scripts/dev-up.ps1`
 
 ## Next Step
 
-Begin Phase 2 (T2.1–T2.6): invitation lifecycle, passwordless links,
-sessions, account states, dual-control admin changes, deny-by-default
-authorization middleware — building on the schema tables already in place.
+Awaiting decision-maker go-ahead, then Phase 2 (T2.1–T2.6): invitation lifecycle, passwordless links, sessions, account states, dual-control admin changes, deny-by-default authorization middleware — building on the schema tables already in place.

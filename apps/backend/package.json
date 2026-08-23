@@ -6,7 +6,9 @@
   "scripts": {
     "migrate": "tsx src/tools/migrate.ts",
     "start": "tsx src/server.ts",
-    "start:worker": "tsx src/worker/index.ts"
+    "start:worker": "tsx src/worker/index.ts",
+    "lint": "eslint .",
+    "typecheck": "tsc --noEmit"
   },
   "dependencies": {
     "express": "^5.1.0",
@@ -17,6 +19,8 @@
     "@types/express": "^5.0.0",
     "@types/node": "^22.10.0",
     "@types/pg": "^8.11.0",
-    "typescript": "^5.7.0"
+    "eslint": "^9.39.5",
+    "typescript": "^5.7.0",
+    "typescript-eslint": "^8.67.0"
   }
 }
