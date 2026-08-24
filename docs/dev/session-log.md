@@ -4,6 +4,14 @@ Newest entries first. Append-only — never delete or rewrite prior entries.
 
 ---
 
+## 2026-08-24 - ADR-030 gate APPROVED; MVP complete through release-validation
+
+**Done:** Recorded decision-maker approval in docs/gate/sign-off.md (status APPROVED, 2026-08-24 UTC). All nine phases complete: foundation, identity, profile/resume processing, source adapters + shared pipeline, discovery/background work, hybrid evaluation, dashboard, operations, and the release-validation gate.
+
+**Verified:** CI green on gate commit b3252d5 (all 5 jobs); vitest 18 files passing at sign-off time.
+
+**Next step:** Operational onboarding (OCI tenancy, production secrets via Vault procedure, compose.prod.yaml deploy, RemoteOK display obligations, restricted Gemini keys). Re-run relevant gate evidence rows on any material change per ADR-030.
+
 ## 2026-08-23 - Phase 9 (T9.1-T9.3) gate package complete; sign-off pending
 
 **Done:** T9.2 adversarial untrusted-content suite (test/adversarial.test.ts, 10 tests): prompt-injection payloads planted in structured job fields cannot flip hard-constraint outcomes or trick remote inference; resume-carried instructions cannot add proposal fields or escalate privileges; fabricated evidence refs and requirement claims rejected; lifecycle tampering blocked; append-only snapshots resist mutation. Gate produced two REAL hardening fixes: (a) remote-work inference tightened to strict prefix matching - injection text merely containing 'remote' previously flipped work-mode facts; (b) proposal entry objects now enforce exact key whitelists. T9.1: docs/gate/evidence-checklist.md maps every ADR-030 dimension to executable artifacts with residual items tracked. T9.3: docs/gate/sign-off.md prepared, status PENDING decision-maker approval.
@@ -146,6 +154,7 @@ Newest entries first. Append-only — never delete or rewrite prior entries.
 
 **Next session:** start Phase 1 (T1.1–T1.4 in `docs/handoff/tasks.md`). Read `AGENTS.md` and `docs/dev/current-state.md` first.
 
+---
 ---
 ---
 ---

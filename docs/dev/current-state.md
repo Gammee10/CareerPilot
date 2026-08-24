@@ -100,7 +100,7 @@ Last updated: 2026-08-23 (Phase 4 implementation session)
 | 6 â€” Hybrid Evaluation | Not started |
 | 7 - Dashboard | Complete (T7.1-T7.6 verified) |
 | 8 - Operations | Complete (T8.1-T8.5 verified) |
-| 9 - Release-Validation Gate | Evidence complete; awaiting decision-maker sign-off |
+| 9 - Release-Validation Gate | Complete — APPROVED by decision maker 2026-08-24 (docs/gate/sign-off.md) |
 
 ## Repository State
 
@@ -153,4 +153,4 @@ Local stack runs healthy via `powershell -File scripts/dev-up.ps1`
 
 ## Next Step
 
-Awaiting decision-maker gate sign-off (docs/gate/sign-off.md). On APPROVED: beta onboarding may begin. Operational follow-ups remain tracked in the evidence checklist residual items.
+Gate APPROVED 2026-08-24 - MVP build complete through the ADR-030 gate. Remaining work is operational onboarding: OCI tenancy provisioning (VM, Object Storage buckets, Vault), production secrets retrieval + deployment via compose.prod.yaml, RemoteOK display obligations before listings go public, restricted Gemini keys. Re-run relevant gate evidence rows on any material change per ADR-030.

@@ -1,7 +1,7 @@
 # ADR-030 Release-Validation Gate — Sign-Off Record (T9.3)
 
 Gate package: `docs/gate/evidence-checklist.md` (dimension → artifact mapping),
-plus the full automated suite (17 test files / 131+ tests, CI job `identity`
+plus the full automated suite (18 test files / 131+ tests, CI job `identity`
 and `stack-tests`), the executed restore drill (`docs/dev/drill-log.md`), and
 the recorded preconditions in `docs/dev/current-state.md`.
 
@@ -26,6 +26,6 @@ the recorded preconditions in `docs/dev/current-state.md`.
 | Field | Value |
 |---|---|
 | Decision maker | Gammee10 |
-| Status | **PENDING** |
-| Date | — |
-| Notes | Beta onboarding is prohibited until this record is set to APPROVED by the decision maker. |
+| Status | **APPROVED** |
+| Date | 2026-08-24 (UTC) |
+| Notes | Decision maker reviewed `docs/gate/evidence-checklist.md`, the executed restore drill (`docs/dev/drill-log.md`), and the recorded preconditions (Gemini unpaid-tier terms verified vs ADR-060; per-source API terms validations recorded), then approved the gate for private-beta onboarding. Residual items above are acknowledged and tracked; they do not block onboarding but must be completed before the affected surfaces reach beta users. |
