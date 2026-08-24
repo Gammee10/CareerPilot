@@ -60,9 +60,17 @@ export function validateProposal(raw: unknown):
   if (!Array.isArray(employment) || employment.length > 25) {
     return { ok: false, reason: "invalid_employment" };
   }
+  const EMPLOYMENT_KEYS = ["title", "company", "startDate", "endDate"];
   for (const e of employment) {
+    if (!isPlainObject(e)) return { ok: false, reason: "invalid_employment_entry" };
+    // Exact key whitelist: injected extra fields (workflow tampering, T9.2)
+    // are rejected rather than silently ignored.
+    for (const key of Object.keys(e)) {
+      if (!EMPLOYMENT_KEYS.includes(key)) {
+        return { ok: false, reason: `unknown_employment_field:${key}` };
+      }
+    }
     if (
-      !isPlainObject(e) ||
       typeof e.title !== "string" ||
       typeof e.company !== "string" ||
       typeof e.startDate !== "string" ||
@@ -76,9 +84,15 @@ export function validateProposal(raw: unknown):
   if (!Array.isArray(education) || education.length > 15) {
     return { ok: false, reason: "invalid_education" };
   }
+  const EDUCATION_KEYS = ["degree", "institution", "year"];
   for (const e of education) {
+    if (!isPlainObject(e)) return { ok: false, reason: "invalid_education_entry" };
+    for (const key of Object.keys(e)) {
+      if (!EDUCATION_KEYS.includes(key)) {
+        return { ok: false, reason: `unknown_education_field:${key}` };
+      }
+    }
     if (
-      !isPlainObject(e) ||
       typeof e.degree !== "string" ||
       typeof e.institution !== "string" ||
       typeof e.year !== "number" ||

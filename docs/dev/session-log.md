@@ -4,6 +4,16 @@ Newest entries first. Append-only — never delete or rewrite prior entries.
 
 ---
 
+## 2026-08-23 - Phase 9 (T9.1-T9.3) gate package complete; sign-off pending
+
+**Done:** T9.2 adversarial untrusted-content suite (test/adversarial.test.ts, 10 tests): prompt-injection payloads planted in structured job fields cannot flip hard-constraint outcomes or trick remote inference; resume-carried instructions cannot add proposal fields or escalate privileges; fabricated evidence refs and requirement claims rejected; lifecycle tampering blocked; append-only snapshots resist mutation. Gate produced two REAL hardening fixes: (a) remote-work inference tightened to strict prefix matching - injection text merely containing 'remote' previously flipped work-mode facts; (b) proposal entry objects now enforce exact key whitelists. T9.1: docs/gate/evidence-checklist.md maps every ADR-030 dimension to executable artifacts with residual items tracked. T9.3: docs/gate/sign-off.md prepared, status PENDING decision-maker approval.
+
+**Verified:** vitest 18 files ALL PASSING (incl. 10 adversarial tests); lint+typecheck clean.
+
+**Deviations surfaced:** none architectural. The two hardening fixes were defects found BY the gate suite and are recorded as gate outcomes, not silent changes.
+
+**Next step:** Decision-maker review of docs/gate/evidence-checklist.md + sign-off in docs/gate/sign-off.md. On APPROVED, beta onboarding may begin.
+
 ## 2026-08-23 - Phase 8 (T8.1-T8.5) implemented and verified
 
 **Done:** Structured logging module (withCorrelation/logEvent/withWorkUnit) + T8.1 log-scan journey test proving zero resume/profile/job/AI canaries in emitted logs. Retention sweeps per category schedules with append-only-permitted transactions (resume grace 30d soft-delete, shared 180d, audit 12mo, exceptional access 24mo). ops/backup.sh (pg_dump -Fc -> AES-256-CBC client-side encryption -> integrity decrypt-and-hash -> 90d cleanup -> minimized telemetry; UPLOAD_CMD hook for OCI bucket). ops/health-check.sh with DRY_RUN minimized alert payload (containers/disk/postgres/backup-freshness). ops/restore-drill.sh + deletion-replay.sql sourcing post-backup closure audits from the live immutable log; scripts/test-backup.sh executes full cycle incl. tampered-artifact rejection and replay proof. CI stack-tests job extended.
@@ -136,6 +146,7 @@ Newest entries first. Append-only — never delete or rewrite prior entries.
 
 **Next session:** start Phase 1 (T1.1–T1.4 in `docs/handoff/tasks.md`). Read `AGENTS.md` and `docs/dev/current-state.md` first.
 
+---
 ---
 ---
 ---

@@ -20,11 +20,16 @@ export type EvidenceEntry = { field: string; value: string };
 /** Named structured fields + description excerpt; stable reference keys. */
 export type EvidenceMap = Record<string, EvidenceEntry>;
 
-const REMOTE_KEYWORDS = /\bremote\b|\bdistributed\b|\bwork from anywhere\b/i;
+// Conservative remote-work inference (adversarial hardening, T9.2): only
+// locations BEGINNING with an explicit remote/distributed form count. Free
+// text merely CONTAINING "remote" (e.g. injected instructions) must not flip
+// work-mode facts.
+const REMOTE_PREFIX_RE =
+  /^\s*(fully remote|100% remote|remote|distributed|work from anywhere)\b/i;
 
 export function inferRemote(location: string | null): boolean | null {
   if (location === null || location.trim().length === 0) return null;
-  return REMOTE_KEYWORDS.test(location);
+  return REMOTE_PREFIX_RE.test(location);
 }
 
 export async function loadJobView(

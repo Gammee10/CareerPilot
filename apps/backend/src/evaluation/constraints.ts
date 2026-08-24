@@ -20,7 +20,10 @@ export type ConstraintResult = {
   unknowns: ConstraintUnknown[];
 };
 
-const REMOTE_RE = /\bremote\b|\bdistributed\b|\bwork from anywhere\b/i;
+// Same strict prefix rule as jobFacts.inferRemote — free text containing the
+// word "remote" (e.g. injected instructions) must not satisfy location scope.
+const REMOTE_PREFIX_RE =
+  /^\s*(fully remote|100% remote|remote|distributed|work from anywhere)\b/i;
 
 function asStringArray(v: unknown): string[] {
   return Array.isArray(v) ? v.filter((x): x is string => typeof x === "string") : [];
@@ -76,7 +79,7 @@ export function evaluateHardConstraints(
         const match = allowed.some(
           (a) =>
             facts.location!.toLowerCase().includes(a.toLowerCase()) ||
-            REMOTE_RE.test(facts.location!) // remote satisfies any location scope
+            REMOTE_PREFIX_RE.test(facts.location!) // explicit remote satisfies any location scope
         );
         if (!match) {
           failures.push({

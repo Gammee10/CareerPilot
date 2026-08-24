@@ -11,6 +11,12 @@ Last updated: 2026-08-23 (Phase 4 implementation session)
 
 
 
+
+## Phase 9 Implementation Map
+
+- `test/adversarial.test.ts` - T9.2 adversarial untrusted-content suite (10 tests): injection in structured fields, resume-carried instructions, fabricated evidence refs, lifecycle tampering, snapshot immutability. Produced two hardening fixes: strict prefix-based remote inference (jobFacts + constraints) and exact-key whitelists for proposal entries (proposal.ts).
+- `docs/gate/evidence-checklist.md` - T9.1 ADR-030 dimension-to-artifact mapping with residual items.
+- `docs/gate/sign-off.md` - T9.3 sign-off record; PENDING decision-maker approval (beta onboarding prohibited until APPROVED).
 ## Phase 8 Implementation Map
 
 - `observability/logger.ts` - withCorrelation/logEvent/withWorkUnit: structured JSON lines with ts/level/event/correlationId; minimization enforced by the T8.1 log-scan journey test.
@@ -94,7 +100,7 @@ Last updated: 2026-08-23 (Phase 4 implementation session)
 | 6 â€” Hybrid Evaluation | Not started |
 | 7 - Dashboard | Complete (T7.1-T7.6 verified) |
 | 8 - Operations | Complete (T8.1-T8.5 verified) |
-| 9 â€” Release-Validation Gate | Not started |
+| 9 - Release-Validation Gate | Evidence complete; awaiting decision-maker sign-off |
 
 ## Repository State
 
@@ -147,4 +153,4 @@ Local stack runs healthy via `powershell -File scripts/dev-up.ps1`
 
 ## Next Step
 
-Phase 9 (T9.1-T9.3): ADR-030 release-validation gate - compile recorded evidence for all dimensions, adversarial untrusted-content tests, decision-maker sign-off. No beta onboarding before the gate passes.
+Awaiting decision-maker gate sign-off (docs/gate/sign-off.md). On APPROVED: beta onboarding may begin. Operational follow-ups remain tracked in the evidence checklist residual items.
