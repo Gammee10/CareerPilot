@@ -4,6 +4,16 @@ Newest entries first. Append-only — never delete or rewrite prior entries.
 
 ---
 
+## 2026-08-23 - Phase 5 (T5.1-T5.7) implemented and verified
+
+**Done:** pg-boss 10 integrated (work/boss.ts: queue registry extraction/collection/normalization/canonicalization/analysis/evaluation/availability; ENQUEUE_POLICY bounded transient-only retry at send time). Discovery orchestrator: per-account advisory-lock-serialized intake, manual ~6h refresh guardrail with truthful nextEligibleAt rejection, coalescing into the single queued follow-up (ADR-042), supersession to latest approved profile at run start, suspension/closure stops pending runs, complete/partial/failed aggregation from attempt outcomes (ADR-043). Collection work unit with idempotency identity collection:{runId}:{source}, attempt records, enable/terms gating, outcome mapping per ADR-044 (non-transient and rate-limited terminal; transient rethrown for bounded retry). Time-zone daily scheduling helpers (FR-8). Worker role now boots pg-boss and registers handlers. Routes: manual refresh + truthful status.
+
+**Verified:** vitest 13 files / ALL PASSING incl. new discovery + collection suites covering every T5.x AC (two-time-zone scheduling, guardrail reject/coalesce, concurrent scheduled+manual+profile-change yielding <=1 follow-up, restart-mid-job exactly-once via idempotency identity, forced single-source failure -> partial with usable results, 401 source zero automatic retries, suspension mid-queue defers with no new results, real pg-boss delivery e2e). Live compose stack rebuilt: all healthy, migrations 0001-0005 applied, worker_ready logged.
+
+**Deviations surfaced:** one SCHEMA CORRECTION required and applied in migration 0005: the Phase-1 partial unique index treated a queued follow-up as an active run, making coalescing impossible; replaced with at-most-one-RUNNING + at-most-one-QUEUED indexes. This implements ADR-042 as accepted rather than changing it.
+
+**Next step:** Phase 6 (T6.1-T6.5): hybrid evaluation.
+
 ## 2026-08-23 - Phase 4 (T4.0-T4.6) implemented and verified
 
 **Done:** T4.0 precondition executed: current-API-terms validated and recorded for greenhouse/lever/remoteok in docs/dev/source-terms.md + job_sources columns via migration 0004 (RemoteOK binding obligations: attribution + direct link back, stored as observation restrictions). Adapter layer: PoliteClient (~1 req/s sustained rate, <=3 attempts per ADR-044 with Retry-After honored/capped, non-transient failures never retried, injectable transport+clock), page-budget pagination helper, three adapters emitting contract observations with provenance/restrictions, registry gating collection on enabled+terms-validated BEFORE any request. Pipeline: normalization validation with recorded rejections; idempotent observation persistence scoped to run+hash+signal with initial/material/non_material classification; conservative canonicalization on strong company|title|location key (ambiguous -> separate candidate); non-destructive merge reconciliation records preserving historical evaluations; evidence-weighted availability (explicit signals only, absence never marks unavailable, freshness windows -> stale/uncertain, restored transitions); employer-ATS-preferred link selection.
@@ -87,3 +97,5 @@ Newest entries first. Append-only — never delete or rewrite prior entries.
 **Deviations surfaced:** none.
 
 **Next session:** start Phase 1 (T1.1–T1.4 in `docs/handoff/tasks.md`). Read `AGENTS.md` and `docs/dev/current-state.md` first.
+
+---

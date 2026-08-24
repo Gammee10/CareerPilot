@@ -43,6 +43,10 @@ import {
   listDrafts
 } from "./profile/drafts.js";
 import { getCurrentProfile, saveProfileVersion } from "./profile/profileVersions.js";
+import {
+  MANUAL_REFRESH_MIN_INTERVAL_HOURS,
+  requestDiscoveryRun
+} from "./discovery/orchestrator.js";
 
 export type AppDeps = {
   db: Pool;
@@ -409,6 +413,73 @@ export function buildApp(deps: AppDeps): Express {
         [req.auth!.accountId]
       );
       res.json({ versions: rows.rows });
+    }
+  );
+
+  // ------------------------------------------------------------------
+  // Discovery status + manual refresh (FR-9/10, ADR-042/043 truthfulness).
+  // ------------------------------------------------------------------
+
+  app.post(
+    "/api/account/:accountId/discovery/refresh",
+    requireSession(db, nowFn),
+    requireSelf("accountId"),
+    async (req, res) => {
+      const result = await requestDiscoveryRun(
+        db,
+        req.auth!.accountId,
+        "manual",
+        nowFn(),
+        { manualMinIntervalHours: MANUAL_REFRESH_MIN_INTERVAL_HOURS }
+      );
+      switch (result.outcome) {
+        case "started":
+          res.status(202).json({ state: "started", runId: result.runId });
+          break;
+        case "queued_followup":
+          res.status(202).json({ state: "queued_followup", runId: result.runId });
+          break;
+        case "coalesced":
+          res.status(200).json({ state: "coalesced", runId: result.runId });
+          break;
+        case "rejected_min_interval":
+          // Truthful rejection with the real next-eligible time (FR-9).
+          res.status(200).json({
+            state: "rejected_min_interval",
+            nextEligibleAt: result.nextEligibleAt.toISOString()
+          });
+          break;
+        case "account_inactive":
+          res.status(409).json({ error: "account_inactive" });
+          break;
+      }
+    }
+  );
+
+  app.get(
+    "/api/account/:accountId/discovery/status",
+    requireSession(db, nowFn),
+    requireSelf("accountId"),
+    async (req, res) => {
+      const run = await db.query(
+        `SELECT id, trigger_source, coalesced_reasons, status, started_at, completed_at
+           FROM discovery_runs WHERE account_id = $1
+          ORDER BY created_at DESC LIMIT 1`,
+        [req.auth!.accountId]
+      );
+      if (run.rows.length === 0) {
+        res.status(404).json({ error: "no_runs" });
+        return;
+      }
+      const attempts = await db.query(
+        `SELECT DISTINCT ON (job_source_slug)
+                job_source_slug, status, observation_count, finished_at
+           FROM source_collection_attempts
+          WHERE discovery_run_id = $1
+          ORDER BY job_source_slug, started_at DESC`,
+        [run.rows[0].id]
+      );
+      res.json({ run: run.rows[0], attempts: attempts.rows });
     }
   );
 
