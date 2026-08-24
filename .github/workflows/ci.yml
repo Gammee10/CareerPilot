@@ -121,3 +121,5 @@ jobs:
           docker compose -f compose.yaml -f compose.prod.yaml config -q
       - name: Apply migrations and run schema tests
         run: bash scripts/test-schema.sh
+      - name: Backup pipeline + restore drill with deletion replay (T8.3/T8.4)
+        run: bash scripts/test-backup.sh

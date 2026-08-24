@@ -4,6 +4,16 @@ Newest entries first. Append-only — never delete or rewrite prior entries.
 
 ---
 
+## 2026-08-23 - Phase 8 (T8.1-T8.5) implemented and verified
+
+**Done:** Structured logging module (withCorrelation/logEvent/withWorkUnit) + T8.1 log-scan journey test proving zero resume/profile/job/AI canaries in emitted logs. Retention sweeps per category schedules with append-only-permitted transactions (resume grace 30d soft-delete, shared 180d, audit 12mo, exceptional access 24mo). ops/backup.sh (pg_dump -Fc -> AES-256-CBC client-side encryption -> integrity decrypt-and-hash -> 90d cleanup -> minimized telemetry; UPLOAD_CMD hook for OCI bucket). ops/health-check.sh with DRY_RUN minimized alert payload (containers/disk/postgres/backup-freshness). ops/restore-drill.sh + deletion-replay.sql sourcing post-backup closure audits from the live immutable log; scripts/test-backup.sh executes full cycle incl. tampered-artifact rejection and replay proof. CI stack-tests job extended.
+
+**Verified:** vitest 17 files ALL PASSING (new logging journey-scan, retention category tests). Backup/drill executed for real in disposable containers: DRILL PASSED with closed_accounts_after_replay=1 (deletion-replay proof) and tamper detection recorded; outcome logged in docs/dev/drill-log.md. Health alert DRY_RUN shows minimized payload only. Local lint+typecheck clean.
+
+**Deviations surfaced:** none architectural. Ops notes: backup key file is a VM/Vault capability secret not mounted into app containers; production upload uses UPLOAD_CMD hook with OCI CLI once tenancy exists (same gap as Phase 3 object store).
+
+**Next step:** Phase 9 (T9.1-T9.3): ADR-030 release-validation gate evidence compilation, adversarial untrusted-content tests, decision-maker sign-off.
+
 ## 2026-08-23 - Phase 7 (T7.1-T7.6) implemented and verified
 
 **Done:** Dashboard backend surface: ranked jobs list (eligibility then score; not-interested never re-presented; unavailable shown only when saved), job detail (evidence refs resolved to named fields, preferred/alternative links, RemoteOK-style restrictions surfaced, constraint failures), review lifecycle with strict New->Seen->Saved/Not-interested transitions, evaluate endpoint through the boundary. Disclosure gate (FR-0a): upload grants refused until resume_ai_processing acknowledged; activation notice + acknowledgement endpoint; manual profile path unaffected. Closure flow (FR-0b/ADR-036): request issues FRESH purpose-bound single-use link via new signin_links.purpose, two-step confirm/redeem closes immediately revoking sessions, truthful +30d deletion status, replay/stale/unconfirmed links all fail safely non-disclosing. Search strategy controls (FR-11-13) incl. generated-term disable and expandedFrom transparency. Frontend: landing, sign-in (Suspense-wrapped two-step redemption), closure page, full dashboard component.
@@ -126,6 +136,7 @@ Newest entries first. Append-only — never delete or rewrite prior entries.
 
 **Next session:** start Phase 1 (T1.1–T1.4 in `docs/handoff/tasks.md`). Read `AGENTS.md` and `docs/dev/current-state.md` first.
 
+---
 ---
 ---
 ---

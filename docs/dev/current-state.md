@@ -10,6 +10,15 @@ Last updated: 2026-08-23 (Phase 4 implementation session)
 
 
 
+
+## Phase 8 Implementation Map
+
+- `observability/logger.ts` - withCorrelation/logEvent/withWorkUnit: structured JSON lines with ts/level/event/correlationId; minimization enforced by the T8.1 log-scan journey test.
+- `observability/retention.ts` - runRetentionSweep: resume 30-day grace soft-delete, shared observations+availability 180d, audit 12mo, exceptional access 24mo; every delete in a transaction marked app.retention_sweep=on.
+- `ops/backup.sh` - pg_dump -Fc -> AES-256-CBC client-side encryption (Vault-held key) -> artifact -> decrypt-and-hash integrity verification -> 90d retention cleanup; minimized telemetry line; UPLOAD_CMD hook for OCI bucket.
+- `ops/health-check.sh` - VM cron script: containers healthy, disk threshold, postgres reachable, backup freshness <=26h; failures produce ONE minimized alert (Resend path or DRY_RUN payload).
+- `ops/restore-drill.sh` + `ops/deletion-replay.sql` + `docs/dev/restore-drill.md` + `docs/dev/drill-log.md` - monthly drill runbook; deletion replay sources post-backup closure audits from the LIVE immutable audit log and re-applies them to the restored copy.
+- `scripts/test-backup.sh` - CI/executable evidence: full backup -> post-backup closure -> restore drill with replay proof -> tampered-artifact rejection.
 ## Phase 7 Implementation Map
 
 - `db/migrations/0007_dashboard.sql` — signin_links.purpose ('signin'|'closure_confirm'), disclosure_acknowledgements (activation_notice / resume_ai_processing), search_terms.expanded_from.
@@ -84,7 +93,7 @@ Last updated: 2026-08-23 (Phase 4 implementation session)
 | 5 â€” Discovery Orchestration and Background Work | Not started |
 | 6 â€” Hybrid Evaluation | Not started |
 | 7 - Dashboard | Complete (T7.1-T7.6 verified) |
-| 8 â€” Operations | Not started |
+| 8 - Operations | Complete (T8.1-T8.5 verified) |
 | 9 â€” Release-Validation Gate | Not started |
 
 ## Repository State
@@ -138,4 +147,4 @@ Local stack runs healthy via `powershell -File scripts/dev-up.ps1`
 
 ## Next Step
 
-Phase 8 (T8.1–T8.5): operations - structured JSON logging with minimization, health checks + Resend admin alerts, daily encrypted pg_dump backup pipeline to dedicated bucket, restore runbook with deletion-replay drill, retention enforcement for all category schedules.
+Phase 9 (T9.1-T9.3): ADR-030 release-validation gate - compile recorded evidence for all dimensions, adversarial untrusted-content tests, decision-maker sign-off. No beta onboarding before the gate passes.
