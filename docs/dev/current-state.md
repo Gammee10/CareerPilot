@@ -9,6 +9,15 @@ Last updated: 2026-08-23 (Phase 4 implementation session)
 
 
 
+
+## Phase 7 Implementation Map
+
+- `db/migrations/0007_dashboard.sql` — signin_links.purpose ('signin'|'closure_confirm'), disclosure_acknowledgements (activation_notice / resume_ai_processing), search_terms.expanded_from.
+- `dashboard/jobs.ts` — ranked list (eligibility then score; not-interested never shown; unavailable only when saved), detail view (evidence refs resolved, preferred/alternative links, source restrictions, constraint failures), review lifecycle New->Seen->Saved / Seen->Not-interested with strict transitions.
+- `identity/closure.ts` — closure request issues FRESH purpose-bound single-use link (invalidates prior), two-step confirm/redeem, immediate close via state machine (revokes sessions), truthful deletion deadline (+30d).
+- `profile/searchStrategy.ts` — terms w/ origin + expandedFrom, generated-term enable/disable, source targeting, FR-13 transparency notice.
+- Disclosure gate: upload-grant route returns disclosure_required until resume_ai_processing acknowledged. Manual profile path needs no acknowledgement.
+- Frontend: app/page.tsx (landing/sign-in), app/signin (two-step link redemption), app/closure (warning + confirm + truthful status), app/dashboard (ranked jobs w/ evidence detail + review buttons, discovery status incl. partial rendering, refresh button, search-strategy controls, closure request). All API access same-origin under Caddy.
 ## Phase 6 Implementation Map
 
 - `evaluation/jobFacts.ts` — structured facts + named-field evidence map from the canonical job's listings. CONSTRAINT inputs are structured fields only.
@@ -74,7 +83,7 @@ Last updated: 2026-08-23 (Phase 4 implementation session)
 | 4 â€” Source Adapters and Shared Job Pipeline | Not started (T4.0 terms validation is a blocking precondition) |
 | 5 â€” Discovery Orchestration and Background Work | Not started |
 | 6 â€” Hybrid Evaluation | Not started |
-| 7 â€” Dashboard | Not started |
+| 7 - Dashboard | Complete (T7.1-T7.6 verified) |
 | 8 â€” Operations | Not started |
 | 9 â€” Release-Validation Gate | Not started |
 
@@ -129,4 +138,4 @@ Local stack runs healthy via `powershell -File scripts/dev-up.ps1`
 
 ## Next Step
 
-Phase 7 (T7.1-T7.6): Next.js dashboard on the user-scoped query/command boundary - ranked new-jobs view with evidence detail, save/not-interested lifecycle, truthful status rendering, disclosure/acknowledgement flows, closure flow with fresh passwordless confirmation, search-strategy controls.
+Phase 8 (T8.1–T8.5): operations - structured JSON logging with minimization, health checks + Resend admin alerts, daily encrypted pg_dump backup pipeline to dedicated bucket, restore runbook with deletion-replay drill, retention enforcement for all category schedules.

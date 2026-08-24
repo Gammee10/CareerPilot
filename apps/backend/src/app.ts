@@ -47,6 +47,24 @@ import {
   MANUAL_REFRESH_MIN_INTERVAL_HOURS,
   requestDiscoveryRun
 } from "./discovery/orchestrator.js";
+import { evaluateJobForUser } from "./evaluation/engine.js";
+import {
+  listJobsForDashboard,
+  getJobDetail,
+  transitionReview
+} from "./dashboard/jobs.js";
+import {
+  acknowledgeDisclosure,
+  closureStatus,
+  confirmClosureLink,
+  hasAcknowledged,
+  redeemClosureConfirmation,
+  requestClosureConfirmation
+} from "./identity/closure.js";
+import {
+  getSearchStrategy,
+  updateSearchStrategy
+} from "./profile/searchStrategy.js";
 
 export type AppDeps = {
   db: Pool;
@@ -210,8 +228,126 @@ export function buildApp(deps: AppDeps): Express {
     requireSession(db, nowFn),
     requireSelf("accountId"),
     async (req, res) => {
+      // FR-0a gate: contextual pre-upload disclosure must be acknowledged.
+      if (!(await hasAcknowledged(db, req.auth!.accountId, "resume_ai_processing"))) {
+        res.status(403).json({
+          error: "disclosure_required",
+          disclosureKey: "resume_ai_processing"
+        });
+        return;
+      }
       const grant = await createUploadGrant(db, req.auth!.accountId, nowFn());
       res.status(201).json({ token: grant.token, expiresAt: grant.expiresAt.toISOString() });
+    }
+  );
+
+  // ------------------------------------------------------------------
+  // Disclosures (FR-0a/ADR-035).
+  // ------------------------------------------------------------------
+
+  app.get(
+    "/api/account/:accountId/disclosures",
+    requireSession(db, nowFn),
+    requireSelf("accountId"),
+    async (req, res) => {
+      const keys = ["activation_notice", "resume_ai_processing"];
+      const out: Record<string, boolean> = {};
+      for (const k of keys) {
+        out[k] = await hasAcknowledged(db, req.auth!.accountId, k);
+      }
+      res.json({ acknowledgements: out });
+    }
+  );
+
+  app.post(
+    "/api/account/:accountId/disclosures/acknowledge",
+    requireSession(db, nowFn),
+    requireSelf("accountId"),
+    async (req, res) => {
+      const key = String(req.body?.disclosureKey ?? "");
+      if (!["activation_notice", "resume_ai_processing"].includes(key)) {
+        res.status(422).json({ error: "invalid_disclosure_key" });
+        return;
+      }
+      await acknowledgeDisclosure(db, req.auth!.accountId, key, nowFn());
+      res.status(200).json({ status: "acknowledged", disclosureKey: key });
+    }
+  );
+
+  // ------------------------------------------------------------------
+  // Jobs dashboard surface (T7.2/T7.3) — user-scoped, ownership-guarded.
+  // ------------------------------------------------------------------
+
+  app.get(
+    "/api/account/:accountId/jobs",
+    requireSession(db, nowFn),
+    requireSelf("accountId"),
+    async (req, res) => {
+      const jobs = await listJobsForDashboard(db, req.auth!.accountId);
+      res.json({ jobs });
+    }
+  );
+
+  app.get(
+    "/api/account/:accountId/jobs/:jobId/detail",
+    requireSession(db, nowFn),
+    requireSelf("accountId"),
+    async (req, res) => {
+      const detail = await getJobDetail(db, req.auth!.accountId, String(req.params.jobId));
+      if (!detail) {
+        res.status(404).json({ error: "not_found" });
+        return;
+      }
+      res.json(detail);
+    }
+  );
+
+  app.post(
+    "/api/account/:accountId/jobs/:jobId/review",
+    requireSession(db, nowFn),
+    requireSelf("accountId"),
+    async (req, res) => {
+      const state = String(req.body?.state ?? "");
+      if (!["seen", "saved", "not_interested"].includes(state)) {
+        res.status(422).json({ error: "invalid_state" });
+        return;
+      }
+      const result = await transitionReview(
+        db,
+        req.auth!.accountId,
+        String(req.params.jobId),
+        state,
+        nowFn()
+      );
+      if (!result.ok) {
+        res.status(result.reason === "job_not_found" ? 404 : 409).json({ error: result.reason });
+        return;
+      }
+      res.status(200).json({ state: result.state });
+    }
+  );
+
+  app.post(
+    "/api/account/:accountId/jobs/:jobId/evaluate",
+    requireSession(db, nowFn),
+    requireSelf("accountId"),
+    async (req, res) => {
+      const result = await evaluateJobForUser(
+        db,
+        req.auth!.accountId,
+        String(req.params.jobId),
+        nowFn(),
+        ai
+      );
+      if (!result.ok) {
+        res.status(404).json({ error: result.reason });
+        return;
+      }
+      res.status(result.ok ? 200 : 500).json({
+        evaluationId: result.evaluationId,
+        eligibility: result.eligibility,
+        aiUsed: result.aiUsed
+      });
     }
   );
 
@@ -482,6 +618,104 @@ export function buildApp(deps: AppDeps): Express {
       res.json({ run: run.rows[0], attempts: attempts.rows });
     }
   );
+
+  // ------------------------------------------------------------------
+  // Search strategy controls (T7.6, FR-11–13).
+  // ------------------------------------------------------------------
+
+  app.get(
+    "/api/account/:accountId/search-strategy",
+    requireSession(db, nowFn),
+    requireSelf("accountId"),
+    async (req, res) => {
+      const strategy = await getSearchStrategy(db, req.auth!.accountId);
+      res.json(strategy);
+    }
+  );
+
+  app.put(
+    "/api/account/:accountId/search-strategy",
+    requireSession(db, nowFn),
+    requireSelf("accountId"),
+    async (req, res) => {
+      const body = req.body ?? {};
+      await updateSearchStrategy(
+        db,
+        req.auth!.accountId,
+        {
+          terms: Array.isArray(body.terms) ? body.terms : undefined,
+          enableGenerated: Array.isArray(body.enableGenerated) ? body.enableGenerated : undefined,
+          sourceTargeting:
+            typeof body.sourceTargeting === "object" && body.sourceTargeting !== null
+              ? body.sourceTargeting
+              : undefined,
+          disabledSources: Array.isArray(body.disabledSources) ? body.disabledSources : undefined
+        },
+        nowFn()
+      );
+      const strategy = await getSearchStrategy(db, req.auth!.accountId);
+      res.json(strategy);
+    }
+  );
+
+  // ------------------------------------------------------------------
+  // Account closure (T7.5, FR-0b/ADR-036).
+  // ------------------------------------------------------------------
+
+  app.post(
+    "/api/account/:accountId/closure/request",
+    requireSession(db, nowFn),
+    requireSelf("accountId"),
+    async (req, res) => {
+      const result = await requestClosureConfirmation(db, req.auth!.accountId, nowFn());
+      if ("error" in result) {
+        res.status(409).json({ error: result.error });
+        return;
+      }
+      const emailRow = await db.query<{ email: string }>(
+        "SELECT email::text AS email FROM accounts WHERE id = $1",
+        [req.auth!.accountId]
+      );
+      await mailer.sendClosureConfirmation(
+        emailRow.rows[0].email,
+        `${config.publicUrl}/closure?token=${encodeURIComponent(result.token)}`
+      );
+      res.status(202).json({ state: "confirmation_sent" });
+    }
+  );
+
+  app.get(
+    "/api/account/:accountId/closure/status",
+    requireSession(db, nowFn),
+    requireSelf("accountId"),
+    async (req, res) => {
+      res.json(await closureStatus(db, req.auth!.accountId));
+    }
+  );
+
+  // Public two-step closure confirmation via the FRESH purpose-bound link.
+  app.post("/api/auth/closure/confirm", async (req: Request, res: Response) => {
+    const token = typeof req.body?.token === "string" ? req.body.token : "";
+    const ok = token ? await confirmClosureLink(db, token, nowFn()) : false;
+    if (!ok) {
+      res.status(400).json({ error: "invalid_link" });
+      return;
+    }
+    res.status(200).json({ status: "confirmed" });
+  });
+
+  app.post("/api/auth/closure/redeem", async (req: Request, res: Response) => {
+    const token = typeof req.body?.token === "string" ? req.body.token : "";
+    const result = token ? await redeemClosureConfirmation(db, token, nowFn()) : { ok: false as const };
+    if (!result.ok) {
+      res.status(400).json({ error: "invalid_link" });
+      return;
+    }
+    res.status(200).json({
+      status: "closed",
+      deletionNotice: "Access is blocked and user data will be deleted within 30 days."
+    });
+  });
 
   // ------------------------------------------------------------------
   // Administration routes (least privilege per ADR-016).

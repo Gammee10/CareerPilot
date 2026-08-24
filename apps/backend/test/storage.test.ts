@@ -29,6 +29,10 @@ async function setupUserWithCookie(email: string): Promise<{ cookie: string; acc
   const adminId = await createBootstrapAdmin(h.db, "admin@example.invalid");
   const user = await createActiveUser(h, email, adminId, t0);
 
+  // FR-0a: resume upload requires prior contextual disclosure acknowledgement.
+  const { acknowledgeDisclosure } = await import("../src/identity/closure.js");
+  await acknowledgeDisclosure(h.db, user.accountId, "resume_ai_processing", t0);
+
   let cookie = "";
   await withServer(h.app, async (port) => {
     const { requestSignInLink, confirmSignInLink } = await import(

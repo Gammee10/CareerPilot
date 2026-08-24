@@ -4,6 +4,16 @@ Newest entries first. Append-only — never delete or rewrite prior entries.
 
 ---
 
+## 2026-08-23 - Phase 7 (T7.1-T7.6) implemented and verified
+
+**Done:** Dashboard backend surface: ranked jobs list (eligibility then score; not-interested never re-presented; unavailable shown only when saved), job detail (evidence refs resolved to named fields, preferred/alternative links, RemoteOK-style restrictions surfaced, constraint failures), review lifecycle with strict New->Seen->Saved/Not-interested transitions, evaluate endpoint through the boundary. Disclosure gate (FR-0a): upload grants refused until resume_ai_processing acknowledged; activation notice + acknowledgement endpoint; manual profile path unaffected. Closure flow (FR-0b/ADR-036): request issues FRESH purpose-bound single-use link via new signin_links.purpose, two-step confirm/redeem closes immediately revoking sessions, truthful +30d deletion status, replay/stale/unconfirmed links all fail safely non-disclosing. Search strategy controls (FR-11-13) incl. generated-term disable and expandedFrom transparency. Frontend: landing, sign-in (Suspense-wrapped two-step redemption), closure page, full dashboard component.
+
+**Verified:** vitest 15 files ALL PASSING incl. dashboard suite (cross-account denial over the entire new surface, not-interested exclusion, disclosure gate before/after ack, closure happy path + reuse + stale-token + no-confirm cases + immediate 401, partial-status exposure, strategy round-trip). Frontend lint+build clean. Live stack rebuilt healthy; dashboard/signin served 200 through Caddy.
+
+**Deviations surfaced:** none architectural. Note: evaluations supersession remains derived (no mutation of append-only rows).
+
+**Next step:** Phase 8 (T8.1-T8.5): operations - logging minimization, health/alerts, encrypted backups, restore drill runbook, retention enforcement.
+
 ## 2026-08-23 - CI fix: Phase 5/6 identity-job failures
 
 **Done:** Diagnosed GitHub Actions failures on Phase 5/6 commits (only the identity/vitest job failed). Reproduced in a Linux container against a fresh Postgres: 5 unhandled rejections from maybeCompleteRun querying pgboss.job - delivery-machinery state used for domain completion and absent in CI. Fixed by migration 0006 (discovery_runs.targeted_sources) + checkAndCompleteRun: run completion now derives from authoritative attempt records vs declared targets, awaited inside the handler with failures contained. Regression test added (auto-complete on terminal attempts -> partial). Also restored local node_modules clobbered by an npm ci inside a mounted container (lesson recorded: isolate with named volumes).
@@ -116,6 +126,7 @@ Newest entries first. Append-only — never delete or rewrite prior entries.
 
 **Next session:** start Phase 1 (T1.1–T1.4 in `docs/handoff/tasks.md`). Read `AGENTS.md` and `docs/dev/current-state.md` first.
 
+---
 ---
 ---
 ---

@@ -5,6 +5,7 @@
 export interface Mailer {
   sendInvitation(email: string, url: string): Promise<void>;
   sendSignInLink(email: string, url: string): Promise<void>;
+  sendClosureConfirmation(email: string, url: string): Promise<void>;
 }
 
 export class LoggingMailer implements Mailer {
@@ -14,17 +15,24 @@ export class LoggingMailer implements Mailer {
   async sendSignInLink(_email: string, _url: string): Promise<void> {
     console.log(JSON.stringify({ event: "mailer_signin_link_send" }));
   }
+  async sendClosureConfirmation(_email: string, _url: string): Promise<void> {
+    console.log(JSON.stringify({ event: "mailer_closure_send" }));
+  }
 }
 
 // Test-only capture mailer. Never used in production wiring.
 export class CaptureMailer implements Mailer {
   invitations: Array<{ email: string; url: string }> = [];
   signInLinks: Array<{ email: string; url: string }> = [];
+  closureConfirmations: Array<{ email: string; url: string }> = [];
 
   async sendInvitation(email: string, url: string): Promise<void> {
     this.invitations.push({ email, url });
   }
   async sendSignInLink(email: string, url: string): Promise<void> {
     this.signInLinks.push({ email, url });
+  }
+  async sendClosureConfirmation(email: string, url: string): Promise<void> {
+    this.closureConfirmations.push({ email, url });
   }
 }
