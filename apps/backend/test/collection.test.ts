@@ -202,6 +202,40 @@ describe("collection work unit", () => {
     expect(obs.rows[0].n).toBe(0);
   });
 
+  it("run auto-completes when every targeted source reaches a terminal attempt", async () => {
+    const user = await setupUserWithProfile();
+    const runId = await createRunningRun(user);
+    await db.query(
+      `UPDATE job_sources SET terms_validation_recorded_at = now() WHERE slug IN ('greenhouse','lever')`
+    );
+    // Declare the run's targets (normally done when jobs are enqueued).
+    await db.query(
+      `UPDATE discovery_runs SET targeted_sources = '["greenhouse","lever"]'::jsonb WHERE id = $1`,
+      [runId]
+    );
+
+    await runCollectionJob(
+      { db, transport: okTransport(GREENHOUSE_PAGE), now },
+      { runId, sourceSlug: "greenhouse", config: { boardToken: "acme" } }
+    );
+    let status = await db.query<{ status: string }>(
+      "SELECT status FROM discovery_runs WHERE id = $1",
+      [runId]
+    );
+    expect(status.rows[0].status).toBe("running"); // one target still pending
+
+    const failing: Transport = async () => ({ status: 404, headers: {}, body: "" });
+    await runCollectionJob(
+      { db, transport: failing, now },
+      { runId, sourceSlug: "lever", config: { site: "acme" } }
+    );
+    status = await db.query<{ status: string }>(
+      "SELECT status FROM discovery_runs WHERE id = $1",
+      [runId]
+    );
+    expect(status.rows[0].status).toBe("partial"); // auto-completed truthfully
+  });
+
   it("disabled source is refused without any network call", async () => {
     const user = await setupUserWithProfile();
     const runId = await createRunningRun(user);

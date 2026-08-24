@@ -357,3 +357,40 @@ export async function completeRunFromAttempts(
   });
   return { status };
 }
+
+const TERMINAL_ATTEMPT_STATUSES = [
+  "succeeded",
+  "failed_non_transient",
+  "rate_limited",
+  "deferred",
+  "failed_transient"
+];
+
+/**
+ * Auto-completes the run once every TARGETED source has a terminal attempt.
+ * Derived from authoritative attempt records — never from queue state.
+ * Runs without targeted sources are completed explicitly by their driver.
+ */
+export async function checkAndCompleteRun(db: Pool, runId: string, now: Date): Promise<void> {
+  const run = await db.query<{ targeted_sources: string[]; status: string }>(
+    "SELECT targeted_sources, status FROM discovery_runs WHERE id = $1",
+    [runId]
+  );
+  if (run.rows.length === 0) return;
+  const targets = run.rows[0].targeted_sources ?? [];
+  if (targets.length === 0 || run.rows[0].status !== "running") return;
+
+  const done = await db.query<{ job_source_slug: string; status: string }>(
+    `SELECT DISTINCT ON (job_source_slug) job_source_slug, status
+       FROM source_collection_attempts
+      WHERE discovery_run_id = $1
+      ORDER BY job_source_slug, started_at DESC`,
+    [runId]
+  );
+  const terminalSlugs = new Set(
+    done.rows.filter((r) => TERMINAL_ATTEMPT_STATUSES.includes(r.status)).map((r) => r.job_source_slug)
+  );
+  if (targets.every((t) => terminalSlugs.has(t))) {
+    await completeRunFromAttempts(db, runId, now);
+  }
+}

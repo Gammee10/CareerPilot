@@ -6,7 +6,7 @@ import { buildAdapter } from "../sources/registry.js";
 import { checkCollectionAllowed } from "../sources/registry.js";
 import type { SourceSlug } from "../sources/contract.js";
 import { persistObservation, refreshAvailability } from "../sources/pipeline.js";
-import { completeRunFromAttempts } from "./orchestrator.js";
+import { checkAndCompleteRun } from "./orchestrator.js";
 
 
 export type CollectionPayload = {
@@ -143,14 +143,14 @@ export async function runCollectionJob(
 
     await finishAttempt(db, payload.runId, payload.sourceSlug, "succeeded", null, observationCount);
     await rememberOutcome(db, idempotencyKey, "succeeded");
-    void maybeCompleteRun(db, payload.runId, now());
+    await safelyCompleteRun(db, payload.runId, now());
     return { outcome: "succeeded", observationCount };
   } catch (err) {
     if (err instanceof NonTransientError) {
       // Authorization/policy/invalid-request: never retried automatically.
       await finishAttempt(db, payload.runId, payload.sourceSlug, "failed_non_transient", `http_${err.status}`, 0);
       await rememberOutcome(db, idempotencyKey, "failed_non_transient");
-      void maybeCompleteRun(db, payload.runId, now());
+      await safelyCompleteRun(db, payload.runId, now());
       return { outcome: "failed_non_transient", observationCount: 0 };
     }
     if (err instanceof AttemptsExhaustedError) {
@@ -161,7 +161,7 @@ export async function runCollectionJob(
         err.lastStatus ? `http_${err.lastStatus}` : null, 0
       );
       await rememberOutcome(db, idempotencyKey, outcome);
-      void maybeCompleteRun(db, payload.runId, now());
+      await safelyCompleteRun(db, payload.runId, now());
       return { outcome, observationCount: 0 };
     }
     // Unknown/transient failure: record and RETHROW so pg-boss retries within
@@ -171,17 +171,15 @@ export async function runCollectionJob(
   }
 }
 
-async function maybeCompleteRun(db: Pool, runId: string, now: Date): Promise<void> {
-  const pendingJobs = await db.query<{ n: string }>(
-    `SELECT count(*)::text AS n FROM pgboss.job
-      WHERE name = 'collection'
-        AND (payload->>'runId') = $1
-        AND state IN ('created','active','retry')`,
-    [runId]
-  );
-  // 1 because this job itself is still marked active during handling.
-  if (Number(pendingJobs.rows[0].n) <= 1) {
-    await completeRunFromAttempts(db, runId, now);
+// Completion is derived from authoritative attempt records vs the run's
+// targeted sources — never from queue state. Failures here must never
+// escape as unhandled rejections.
+async function safelyCompleteRun(db: Pool, runId: string, now: Date): Promise<void> {
+  try {
+    await checkAndCompleteRun(db, runId, now);
+  } catch (err) {
+    console.log(JSON.stringify({ event: "run_completion_check_failed" }));
+    void err;
   }
 }
 

@@ -4,6 +4,14 @@ Newest entries first. Append-only — never delete or rewrite prior entries.
 
 ---
 
+## 2026-08-23 - CI fix: Phase 5/6 identity-job failures
+
+**Done:** Diagnosed GitHub Actions failures on Phase 5/6 commits (only the identity/vitest job failed). Reproduced in a Linux container against a fresh Postgres: 5 unhandled rejections from maybeCompleteRun querying pgboss.job - delivery-machinery state used for domain completion and absent in CI. Fixed by migration 0006 (discovery_runs.targeted_sources) + checkAndCompleteRun: run completion now derives from authoritative attempt records vs declared targets, awaited inside the handler with failures contained. Regression test added (auto-complete on terminal attempts -> partial). Also restored local node_modules clobbered by an npm ci inside a mounted container (lesson recorded: isolate with named volumes).
+
+**Verified:** Full suite re-run in CI-replica environment (node:22-alpine + postgres:17-alpine, fresh DB): 14 files / 131 tests passed with zero unhandled errors. Local lint+typecheck clean.
+
+**Next step:** Confirm green CI run for this commit; then Phase 7.
+
 ## 2026-08-23 - Phase 6 (T6.1-T6.5) implemented and verified
 
 **Done:** Hybrid evaluation capability under apps/backend/src/evaluation: PURE deterministic hard-constraint engine (remote_only/locations/excluded_companies/salary_floor per FR-6/7; unknowns retained+labeled+penalized; description text never an input so adversarial claims cannot flip rejections). Named-dimension scoring with default weights, simple higher/lower priorities, transparent enumerated penalties, ineligible scores capped <=25 (FR-21). Evidence-linked explanation validator (refs must exist in the job's named-field evidence set; requirement claims without evidence rejected). Immutable evaluation snapshots on the append-only table with supersession DERIVED (no mutation) and ADR-040 compatible-current selection (profile+policy+observation inputs must all match current, else null/pending). Bounded re-evaluation selector limited to active, non-dismissed, already-evaluated jobs. Engine composes stages; optional AI proposals minimized + validated, malformed/unavailable degrades to deterministic-only.
@@ -108,5 +116,6 @@ Newest entries first. Append-only — never delete or rewrite prior entries.
 
 **Next session:** start Phase 1 (T1.1–T1.4 in `docs/handoff/tasks.md`). Read `AGENTS.md` and `docs/dev/current-state.md` first.
 
+---
 ---
 ---
