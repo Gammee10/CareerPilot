@@ -4,6 +4,16 @@ Newest entries first. Append-only — never delete or rewrite prior entries.
 
 ---
 
+## 2026-08-23 - Phase 6 (T6.1-T6.5) implemented and verified
+
+**Done:** Hybrid evaluation capability under apps/backend/src/evaluation: PURE deterministic hard-constraint engine (remote_only/locations/excluded_companies/salary_floor per FR-6/7; unknowns retained+labeled+penalized; description text never an input so adversarial claims cannot flip rejections). Named-dimension scoring with default weights, simple higher/lower priorities, transparent enumerated penalties, ineligible scores capped <=25 (FR-21). Evidence-linked explanation validator (refs must exist in the job's named-field evidence set; requirement claims without evidence rejected). Immutable evaluation snapshots on the append-only table with supersession DERIVED (no mutation) and ADR-040 compatible-current selection (profile+policy+observation inputs must all match current, else null/pending). Bounded re-evaluation selector limited to active, non-dismissed, already-evaluated jobs. Engine composes stages; optional AI proposals minimized + validated, malformed/unavailable degrades to deterministic-only.
+
+**Verified:** vitest 14 files ALL PASSING incl. new evaluation suite covering every T6.x AC (adversarial-text non-influence, FR-7 salary semantics, priority weight shifts, penalty enumeration, evidence-ref fabrication rejection, snapshot supersession attribution, incompatible-input nulls, bounded re-eval exclusions). Backend lint+typecheck clean.
+
+**Deviations surfaced:** none architectural. Design note recorded: evaluations.superseded boolean column is retained but unused - supersession is derived from newer snapshots because append-only rows are never mutated (invariant 7).
+
+**Next step:** Phase 7 (T7.1-T7.6): Next.js dashboard.
+
 ## 2026-08-23 - Phase 5 (T5.1-T5.7) implemented and verified
 
 **Done:** pg-boss 10 integrated (work/boss.ts: queue registry extraction/collection/normalization/canonicalization/analysis/evaluation/availability; ENQUEUE_POLICY bounded transient-only retry at send time). Discovery orchestrator: per-account advisory-lock-serialized intake, manual ~6h refresh guardrail with truthful nextEligibleAt rejection, coalescing into the single queued follow-up (ADR-042), supersession to latest approved profile at run start, suspension/closure stops pending runs, complete/partial/failed aggregation from attempt outcomes (ADR-043). Collection work unit with idempotency identity collection:{runId}:{source}, attempt records, enable/terms gating, outcome mapping per ADR-044 (non-transient and rate-limited terminal; transient rethrown for bounded retry). Time-zone daily scheduling helpers (FR-8). Worker role now boots pg-boss and registers handlers. Routes: manual refresh + truthful status.
@@ -98,4 +108,5 @@ Newest entries first. Append-only — never delete or rewrite prior entries.
 
 **Next session:** start Phase 1 (T1.1–T1.4 in `docs/handoff/tasks.md`). Read `AGENTS.md` and `docs/dev/current-state.md` first.
 
+---
 ---

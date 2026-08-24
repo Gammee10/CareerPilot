@@ -8,6 +8,16 @@ Last updated: 2026-08-23 (Phase 4 implementation session)
 2. **Source adapter terms (T4.0): RECORDED 2026-08-23** â€” `docs/dev/source-terms.md` + `job_sources.terms_validation_*` set by migration 0004 for greenhouse/lever/remoteok. Key obligations: RemoteOK requires source attribution + DIRECT link back (stored as `remoteok_attribution_direct_link` restriction on every observation; display surfaces must render it before beta launch); Lever/Greenhouse public reads are unrestricted but conservatively rate-limited (~1 req/s) by our client.
 
 
+
+## Phase 6 Implementation Map
+
+- `evaluation/jobFacts.ts` — structured facts + named-field evidence map from the canonical job's listings. CONSTRAINT inputs are structured fields only.
+- `evaluation/constraints.ts` — PURE deterministic hard-constraint engine (remote_only, locations, excluded_companies, salary_floor per FR-6/7): clear contradictions -> ineligible; undisclosed/ambiguous -> unknown (retained + penalized); description text is never an input, so adversarial claims cannot flip outcomes.
+- `evaluation/scoring.ts` — named dimensions (role_match .25, skill_match .25, experience_match .2, location_eligibility .15, salary_match .15), simple higher/lower user priorities (FR-22), transparent enumerated penalties incl. no_disclosed_salary / unknown_*; ineligible scores capped <=25 so they cannot outrank eligible results (FR-21).
+- `evaluation/explanation.ts` — strict claim validator: every evidenceRef must exist in the job's evidence set; requirement-kind claims require >=1 ref (T6.3 AC).
+- `evaluation/snapshot.ts` — immutable snapshot creation (append-only table never mutated; supersession is DERIVED) + ADR-040 compatible-current selection (current profile + current policy version mp-1 + latest observation must all match, else null).
+- `evaluation/engine.ts` — hybrid pipeline: constraints FIRST gate everything; optional minimized AI explanation proposals validated against evidence and discarded when malformed/unavailable (deterministic result persists with uncertainty labels).
+- `evaluation/reevaluation.ts` — bounded re-evaluation selector: only ACTIVE availability, non-dismissed, already-evaluated jobs in scope; unavailable/dismissed jobs untouched (T6.5 AC).
 ## Phase 5 Implementation Map
 
 - `db/migrations/0005_work.sql` — accounts.timezone; REPLACED the Phase-1 one-active-run partial index (it made queued follow-ups impossible) with two indexes: at most one RUNNING + at most one QUEUED per user (ADR-042 corrected).
@@ -119,4 +129,4 @@ Local stack runs healthy via `powershell -File scripts/dev-up.ps1`
 
 ## Next Step
 
-Phase 6 (T6.1-T6.5): deterministic hard constraints first, AI-assisted interpretation behind ADR-054 minimization with Node-side validation, dimension scores + evidence-linked explanations, immutable evaluation snapshots with compatible-current-result selection, bounded re-evaluation after material profile change.
+Phase 7 (T7.1-T7.6): Next.js dashboard on the user-scoped query/command boundary - ranked new-jobs view with evidence detail, save/not-interested lifecycle, truthful status rendering, disclosure/acknowledgement flows, closure flow with fresh passwordless confirmation, search-strategy controls.
