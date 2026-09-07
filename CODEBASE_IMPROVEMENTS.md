@@ -123,6 +123,11 @@ Most important areas requiring attention:
   3. Keep `AppDeps.mailer` injection so tests still use the capture/logging double.
 - **Suggested validation:** Integration test with a stubbed fetch asserting send on
   invite + sign-in request; manual dev check that no real email fires locally.
+- **Status: Completed 2026-09-07** — `ResendMailer` implements `Mailer` over the
+  Resend HTTP API (key from file-mounted secret only, `EMAIL_FROM` sender,
+  10s timeout, one bounded retry on 429/5xx, minimized failure logs);
+  `server.ts` selects Resend when the key file exists and refuses to boot in
+  production when missing; `test/mailer.test.ts` covers send/retry/no-retry.
 
 ### C4. Extraction endpoint is IDOR-vulnerable (no document-ownership check)
 
