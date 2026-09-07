@@ -57,15 +57,100 @@ export type UpdateStrategyInput = {
   disabledSources?: string[];
 };
 
+// Adapter slugs accepted in disabledSources (matches the job_sources CHECK
+// constraint; url_import included — a user may disable URL imports too).
+const KNOWN_SOURCE_SLUGS = new Set(["greenhouse", "lever", "remoteok", "url_import"]);
+
+const MAX_TERMS = 100;
+const MAX_TERM_LENGTH = 200;
+
+function isPlainObject(v: unknown): v is Record<string, unknown> {
+  return typeof v === "object" && v !== null && !Array.isArray(v);
+}
+
+function validateInput(input: UpdateStrategyInput): { ok: true } | { ok: false; reason: string } {
+  if (input.terms !== undefined) {
+    if (!Array.isArray(input.terms) || input.terms.length > MAX_TERMS) {
+      return { ok: false, reason: "invalid_terms" };
+    }
+    for (const t of input.terms) {
+      if (
+        !isPlainObject(t) ||
+        typeof t.term !== "string" || t.term.length === 0 || t.term.length > MAX_TERM_LENGTH ||
+        (t.origin !== undefined && t.origin !== "generated" && t.origin !== "user_edited") ||
+        (t.enabled !== undefined && typeof t.enabled !== "boolean") ||
+        (t.expandedFrom !== undefined && t.expandedFrom !== null && typeof t.expandedFrom !== "string")
+      ) {
+        return { ok: false, reason: "invalid_terms" };
+      }
+      if (typeof t.expandedFrom === "string" && t.expandedFrom.length > MAX_TERM_LENGTH) {
+        return { ok: false, reason: "invalid_terms" };
+      }
+    }
+  }
+  if (input.enableGenerated !== undefined) {
+    if (!Array.isArray(input.enableGenerated) || input.enableGenerated.length > MAX_TERMS) {
+      return { ok: false, reason: "invalid_enable_generated" };
+    }
+    for (const g of input.enableGenerated) {
+      if (
+        !isPlainObject(g) ||
+        typeof g.term !== "string" || g.term.length === 0 || g.term.length > MAX_TERM_LENGTH ||
+        typeof g.enabled !== "boolean"
+      ) {
+        return { ok: false, reason: "invalid_enable_generated" };
+      }
+    }
+  }
+  if (input.sourceTargeting !== undefined) {
+    if (!isPlainObject(input.sourceTargeting)) {
+      return { ok: false, reason: "invalid_source_targeting" };
+    }
+    const keys = Object.keys(input.sourceTargeting);
+    if (keys.length > 50) return { ok: false, reason: "invalid_source_targeting" };
+    try {
+      const serialized = JSON.stringify(input.sourceTargeting);
+      if (serialized.length > 10 * 1024) return { ok: false, reason: "invalid_source_targeting" };
+    } catch {
+      return { ok: false, reason: "invalid_source_targeting" };
+    }
+  }
+  if (input.disabledSources !== undefined) {
+    if (
+      !Array.isArray(input.disabledSources) ||
+      input.disabledSources.length > 10 ||
+      input.disabledSources.some((s) => typeof s !== "string" || !KNOWN_SOURCE_SLUGS.has(s))
+    ) {
+      return { ok: false, reason: "invalid_disabled_sources" };
+    }
+  }
+  return { ok: true };
+}
+
 export async function updateSearchStrategy(
   db: Pool,
   accountId: string,
   input: UpdateStrategyInput,
   now: Date
-): Promise<void> {
+): Promise<{ ok: true } | { ok: false; reason: string }> {
+  const valid = validateInput(input);
+  if (!valid.ok) return valid;
+
   const client = await db.connect();
   try {
     await client.query("BEGIN");
+
+    // M4: partial updates preserve unspecified fields. Read the stored row
+    // first and merge — a {terms}-only PUT must not wipe source targeting.
+    const current = await client.query<{
+      source_targeting: Record<string, unknown>;
+      disabled_sources: string[];
+    }>(
+      "SELECT source_targeting, disabled_sources FROM search_strategy WHERE account_id = $1",
+      [accountId]
+    );
+    const sourceTargeting = input.sourceTargeting ?? current.rows[0]?.source_targeting ?? {};
+    const disabledSources = input.disabledSources ?? current.rows[0]?.disabled_sources ?? [];
 
     await client.query(
       `INSERT INTO search_strategy (account_id, source_targeting, disabled_sources, updated_at)
@@ -76,8 +161,8 @@ export async function updateSearchStrategy(
                      updated_at = $4`,
       [
         accountId,
-        JSON.stringify(input.sourceTargeting ?? {}),
-        JSON.stringify(input.disabledSources ?? []),
+        JSON.stringify(sourceTargeting),
+        JSON.stringify(disabledSources),
         now
       ]
     );
@@ -111,6 +196,7 @@ export async function updateSearchStrategy(
     }
 
     await client.query("COMMIT");
+    return { ok: true };
   } catch (err) {
     await client.query("ROLLBACK").catch(() => undefined);
     throw err;

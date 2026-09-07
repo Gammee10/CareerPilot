@@ -13,10 +13,10 @@ import {
 
 let h: Harness;
 const t0 = new Date("2026-08-23T12:00:00Z");
+// Placeholder-only resources: "resume" and "search-strategy" have real GET
+// handlers (not placeholders) and are covered by dedicated assertions below.
 const RESOURCES = [
   "profile",
-  "resume",
-  "search-strategy",
   "discovery-runs",
   "evaluations",
   "reviews"
@@ -120,6 +120,35 @@ describe("deny-by-default isolation", () => {
         );
         expect(res.status).toBe(200);
         expect(res.body).toMatchObject({ accountId: users.accountA });
+      }
+    });
+  });
+
+  it("real GET handlers are not shadowed by placeholders (resume, search-strategy)", async () => {
+    await withServer(h.app, async (port) => {
+      const users = await setupUsers(port);
+      // Owner reads own resume list + search strategy (real shapes, not
+      // placeholder {resource, accountId} payloads).
+      const resume = await request(users.port, "GET", `/api/account/${users.accountA}/resume`, {
+        cookie: users.userACookie
+      });
+      expect(resume.status).toBe(200);
+      expect(resume.body).toHaveProperty("documents");
+      const strategy = await request(
+        users.port, "GET", `/api/account/${users.accountA}/search-strategy`,
+        { cookie: users.userACookie }
+      );
+      expect(strategy.status).toBe(200);
+      expect(strategy.body).toHaveProperty("transparencyNotice");
+      // Cross-account reads still denied without disclosing existence.
+      for (const path of [
+        `/api/account/${users.accountA}/resume`,
+        `/api/account/${users.accountA}/search-strategy`
+      ]) {
+        const denied = await request(users.port, "GET", path, {
+          cookie: users.userBCookie
+        });
+        expect(denied.status).toBe(404);
       }
     });
   });

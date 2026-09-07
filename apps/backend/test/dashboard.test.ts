@@ -445,4 +445,59 @@ describe("T7.6 â€” search strategy controls", () => {
       expect(strategy.terms.some((t) => t.term === "golang jobs")).toBe(true);
     });
   });
+
+  it("M4: partial update preserves targeting; oversized/unknown payloads are 400", async () => {
+    const user = await signIn("strategy2@example.invalid");
+    await withServer(h.app, async (port) => {
+      const path = `/api/account/${user.accountId}/search-strategy`;
+      // Seed targeting + disabled sources with a full update.
+      const full = await request(port, "PUT", path, {
+        cookie: user.cookie,
+        body: {
+          terms: [],
+          sourceTargeting: { companies: ["acme"] },
+          disabledSources: ["remoteok"]
+        }
+      });
+      expect(full.status).toBe(200);
+
+      // A {terms}-only partial update must NOT wipe targeting/sources.
+      const partial = await request(port, "PUT", path, {
+        cookie: user.cookie,
+        body: { terms: [{ term: "rust jobs" }] }
+      });
+      expect(partial.status).toBe(200);
+      const strategy = partial.body as {
+        sourceTargeting: Record<string, unknown>;
+        disabledSources: string[];
+      };
+      expect(strategy.sourceTargeting).toEqual({ companies: ["acme"] });
+      expect(strategy.disabledSources).toEqual(["remoteok"]);
+
+      // Oversized term list → 400, stored strategy untouched.
+      const huge = await request(port, "PUT", path, {
+        cookie: user.cookie,
+        body: { terms: Array.from({ length: 101 }, (_, i) => ({ term: `t${i}` })) }
+      });
+      expect(huge.status).toBe(400);
+      expect(huge.body).toEqual({ error: "invalid_terms" });
+
+      // Unknown source slug → 400.
+      const badSource = await request(port, "PUT", path, {
+        cookie: user.cookie,
+        body: { disabledSources: ["linkedin"] }
+      });
+      expect(badSource.status).toBe(400);
+      expect(badSource.body).toEqual({ error: "invalid_disabled_sources" });
+
+      const after = await request(port, "GET", path, { cookie: user.cookie });
+      expect(after.status).toBe(200);
+      const afterBody = after.body as {
+        sourceTargeting: Record<string, unknown>;
+        disabledSources: string[];
+      };
+      expect(afterBody.sourceTargeting).toEqual({ companies: ["acme"] });
+      expect(afterBody.disabledSources).toEqual(["remoteok"]);
+    });
+  });
 });

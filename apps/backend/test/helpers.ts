@@ -73,7 +73,7 @@ export async function withServer(
 
 export async function request(
   port: number,
-  method: "GET" | "POST",
+  method: "GET" | "POST" | "PUT" | "PATCH" | "DELETE",
   pathUrl: string,
   opts?: { body?: unknown; cookie?: string; headers?: Record<string, string> }
 ): Promise<TestResponse> {

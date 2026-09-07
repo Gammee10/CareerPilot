@@ -296,12 +296,13 @@ export function buildApp(deps: AppDeps): Express {
   // User-scoped resource surface (ADR-014/016): deny-by-default,
   // resource-level ownership checks. Placeholder payloads until later
   // phases implement each capability; authorization behavior is final.
+  // NOTE: "resume" and "search-strategy" are NOT placeholders — they have
+  // real GET handlers below, and listing them here would shadow those
+  // handlers (Express matches in registration order).
   // ------------------------------------------------------------------
 
   const USER_RESOURCES = [
     "profile",
-    "resume",
-    "search-strategy",
     "discovery-runs",
     "evaluations",
     "reviews"
@@ -752,7 +753,7 @@ export function buildApp(deps: AppDeps): Express {
     requireSelf("accountId"),
     async (req, res) => {
       const body = req.body ?? {};
-      await updateSearchStrategy(
+      const result = await updateSearchStrategy(
         db,
         req.auth!.accountId,
         {
@@ -766,6 +767,11 @@ export function buildApp(deps: AppDeps): Express {
         },
         nowFn()
       );
+      // M4: oversized/unknown payloads are 400, never silent wipes or bloat.
+      if (!result.ok) {
+        res.status(400).json({ error: result.reason });
+        return;
+      }
       const strategy = await getSearchStrategy(db, req.auth!.accountId);
       res.json(strategy);
     }

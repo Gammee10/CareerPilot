@@ -683,6 +683,13 @@ Most important areas requiring attention:
   `disabledSources` to known slugs.
 - **Suggested validation:** API tests: partial update preserves targeting; oversized
   payload rejected with 400.
+- **Status: Completed 2026-09-07** — partial PUTs merge over the stored row
+  (targeting/sources preserved when omitted); new bounds (≤100 terms/≤200
+  chars, `disabledSources` restricted to known slugs, targeting object caps)
+  return 400 with the row untouched; route maps invalid to 400. Drive-by fix:
+  the `USER_RESOURCES` placeholder loop shadowed the real GET resume +
+  search-strategy handlers (Express matches in registration order) — both
+  removed from the placeholder list with a regression test.
 
 ### M5. Profile content validation is near-absent; non-string skills 500 downstream
 
