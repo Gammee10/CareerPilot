@@ -2,6 +2,7 @@
 // compatible-current selection for the dashboard.
 import type { Pool } from "pg";
 import { recordAudit } from "../identity/audit.js";
+import { getCurrentJobSelection } from "./currentView.js";
 
 export const MATCHING_POLICY_VERSION = "mp-1";
 
@@ -85,16 +86,10 @@ export async function getCurrentCompatibleEvaluation(
   );
   const profileVersionId = currentProfile.rows[0]?.current_profile_version_id ?? null;
 
-  const latestObs = await db.query<{ latest_observation_id: string | null }>(
-    `SELECT o.id::text AS latest_observation_id
-       FROM source_listing_observations o
-       JOIN source_listings l ON l.id = o.source_listing_id
-      WHERE l.canonical_job_id = $1
-      ORDER BY o.observed_at DESC, o.id DESC
-      LIMIT 1`,
-    [canonicalJobId]
-  );
-  const latestObservationId = latestObs.rows[0]?.latest_observation_id ?? null;
+  // Shared current-view selection (H7): identical "latest observation" to
+  // the one loadJobView builds facts from.
+  const selection = await getCurrentJobSelection(db, canonicalJobId);
+  const latestObservationId = selection?.observationId ?? null;
 
   const row = await db.query<{
     id: string;

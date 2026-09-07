@@ -403,6 +403,12 @@ Most important areas requiring attention:
   (unknown) rather than a title fragment.
 - **Suggested validation:** Evaluation test: seed multi-listing job → both selectors
   agree; dashboard test shows scores instead of permanent pending.
+- **Status: Completed 2026-09-07** — new `evaluation/currentView.ts`
+  `getCurrentJobSelection` (global latest observation by `observed_at DESC,
+  id DESC`) shared by `loadJobView` and `getCurrentCompatibleEvaluation`;
+  primary listing is deterministic (selection's listing, ordered fallback);
+  employer falls back to null instead of a title fragment. Test covers
+  multi-listing agreement + immediate current result.
 
 ### H8. RemoteOK adapter crashes on unexpected shape; no response-size cap
 

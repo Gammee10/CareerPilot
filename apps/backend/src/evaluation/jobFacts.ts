@@ -2,6 +2,7 @@
 // CONSTRAINTS see ONLY these structured fields — never free description text,
 // so adversarial description claims cannot influence eligibility decisions.
 import type { Pool } from "pg";
+import { getCurrentJobSelection } from "./currentView.js";
 
 export type JobFacts = {
   canonicalJobId: string;
@@ -54,22 +55,34 @@ export async function loadJobView(
             l.job_source_slug,
             (SELECT o.id FROM source_listing_observations o
               WHERE o.source_listing_id = l.id
-              ORDER BY o.observed_at DESC, id DESC LIMIT 1) AS latest_observation_id
+              ORDER BY o.observed_at DESC, o.id DESC LIMIT 1) AS latest_observation_id
        FROM source_listings l
-      WHERE l.canonical_job_id = $1`,
+      WHERE l.canonical_job_id = $1
+      ORDER BY l.latest_observation_at DESC NULLS LAST, l.id DESC`,
     [canonicalJobId]
   );
   if (listings.rows.length === 0) return null;
 
-  const primary = listings.rows[0];
-  const companyRow = await db.query<{ provenance: Record<string, unknown> }>(
-    `SELECT provenance FROM source_listing_observations WHERE id = $1`,
-    [primary.latest_observation_id]
-  );
+  // Shared current-view selection (H7): the primary listing is the one
+  // holding the globally latest observation — the same observation
+  // getCurrentCompatibleEvaluation compares snapshots against. Falls back to
+  // the deterministically first listing only when no observation exists yet.
+  const selection = await getCurrentJobSelection(db, canonicalJobId);
+  const primary =
+    (selection && listings.rows.find((l) => l.id === selection.listingId)) ??
+    listings.rows[0];
+  const companyRow = primary.latest_observation_id
+    ? await db.query<{ provenance: Record<string, unknown> }>(
+        `SELECT provenance FROM source_listing_observations WHERE id = $1`,
+        [primary.latest_observation_id]
+      )
+    : { rows: [] as Array<{ provenance: Record<string, unknown> }> };
+  // Employer identity comes only from adapter provenance (board/site slugs).
+  // Never infer a company from the title text: a title fragment as employer
+  // produces excluded_companies false positives/negatives. Unknown stays null.
   const companyName =
     (companyRow.rows[0]?.provenance?.["boardToken"] as string | undefined) ??
     (companyRow.rows[0]?.provenance?.["site"] as string | undefined) ??
-    primary.current_title?.split(/[-–|]/)[0].trim() ??
     null;
 
   const facts: JobFacts = {
@@ -92,10 +105,13 @@ export async function loadJobView(
   };
 
   const sourceSlugs = [...new Set(listings.rows.map((l) => l.job_source_slug))];
+  // The snapshot input id is the shared global-latest observation (H7), so
+  // compatible-current selection agrees with the facts it was computed from.
   const latestObservationId =
-    listings.rows
+    selection?.observationId ??
+    (listings.rows
       .map((l) => l.latest_observation_id)
-      .filter((x): x is string => x !== null)[0] ?? null;
+      .filter((x): x is string => x !== null)[0] ?? null);
 
   return { facts, evidence, latestObservationId, sourceSlugs, companyName: facts.company ?? "" };
 }

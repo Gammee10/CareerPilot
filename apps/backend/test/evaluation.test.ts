@@ -480,3 +480,45 @@ describe("T6.5 — bounded re-evaluation after material profile change", () => {
     expect(untouchedAfter.rows[0].n).toBe(untouchedBefore.rows[0].n);
   });
 });
+
+describe("H7 — shared current-view selection", () => {
+  it("multi-listing job: facts and snapshot selection agree, dashboard is not stuck pending", async () => {
+    const seeded = await seedJobWithEvaluation();
+    // Second listing for the same job with a NEWER observation.
+    await db.query(
+      `INSERT INTO source_listings (job_source_slug, external_listing_key, canonical_job_id,
+          current_title, current_location, preferred_application_url,
+          alternative_application_urls, latest_observation_at, strong_match_key)
+       VALUES ('lever', 'h7-' || gen_random_uuid()::text, $1, 'Backend Engineer',
+               'Remote', 'https://jobs.lever.co/acme/9',
+               '[]'::jsonb, $2, 'acme|backend engineer|remote')`,
+      [seeded.jobId, new Date(t0.getTime() + 60_000)]
+    );
+    await db.query(
+      `INSERT INTO source_listing_observations (source_listing_id, observed_at, availability_signal, content_hash, provenance)
+       SELECT id, $2, 'active', 'h7-new-hash', '{}' FROM source_listings
+        WHERE canonical_job_id = $1 AND job_source_slug = 'lever' LIMIT 1`,
+      [seeded.jobId, new Date(t0.getTime() + 60_000)]
+    );
+
+    const { loadJobView } = await import("../src/evaluation/jobFacts.js");
+    const view = await loadJobView(db, seeded.jobId);
+    expect(view).not.toBeNull();
+    // Newest observation wins regardless of listing insertion order…
+    expect(view!.evidence["field:location"]).toMatchObject({ value: "Remote" });
+    // …and no employer is invented from the title text.
+    expect(view!.facts.company).toBeNull();
+
+    // A fresh evaluation against the agreed view is immediately current.
+    const fresh = await evaluateJobForUser(db, seeded.accountId, seeded.jobId, t0);
+    expect(fresh.ok).toBe(true);
+    if (!fresh.ok) return;
+    const snap = await db.query<{ input_observation_id: string }>(
+      "SELECT input_observation_id FROM evaluations WHERE id = $1",
+      [fresh.evaluationId]
+    );
+    expect(snap.rows[0].input_observation_id).toBe(view!.latestObservationId);
+    const current = await getCurrentCompatibleEvaluation(db, seeded.accountId, seeded.jobId);
+    expect(current?.id).toBe(fresh.evaluationId);
+  });
+});
