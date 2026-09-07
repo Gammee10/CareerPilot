@@ -762,6 +762,14 @@ Most important areas requiring attention:
   ~5 min); fold `is_admin` + active checks into the single `validateSession` join.
 - **Suggested validation:** Benchmark query count per request; test idle-deadline
   still enforced.
+- **Status: Completed 2026-09-07** — the idle UPDATE now runs only when
+  `last_seen_at` is older than ~5 min (deadline stays exact within that
+  granularity; steady traffic drops to ~1 write/5 min/session). The
+  `is_admin` + state checks were already a single joined query. Drive-by fix:
+  `createSession` now stamps `last_seen_at` from the caller clock instead of
+  `DEFAULT now()` (test-clock consistency). Test proves skip-then-refresh
+  behavior; idle-deadline suites still green. Residual: the validate→use race
+  is inherent to middleware auth and unchanged.
 
 ### M9. Worker lifecycle gaps: stale readiness, SIGTERM abandons jobs, no correlation
 

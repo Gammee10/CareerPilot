@@ -80,6 +80,36 @@ describe("session lifetimes", () => {
     const stale = new Date(t0.getTime() + 7 * DAY_MS + MINUTE_MS(1));
     expect((await validateSession(h.db, s.token, stale)).ok).toBe(false);
   });
+
+  it("M8: back-to-back validations skip the idle write; stale ones refresh", async () => {
+    const { userId } = await setup();
+    const s = await createSession(h.db, userId, "user", t0);
+    // 6 minutes after creation: past the granularity → write happens.
+    const t1 = new Date(t0.getTime() + 6 * 60_000);
+    expect((await validateSession(h.db, s.token, t1)).ok).toBe(true);
+    const afterFirst = await h.db.query<{ last_seen_at: Date }>(
+      "SELECT last_seen_at FROM sessions WHERE id = $1",
+      [s.session.id]
+    );
+    expect(afterFirst.rows[0].last_seen_at.getTime()).toBe(t1.getTime());
+    // 30s later: within the 5-minute granularity → no write, timestamp kept.
+    const t2 = new Date(t1.getTime() + 30_000);
+    expect((await validateSession(h.db, s.token, t2)).ok).toBe(true);
+    const afterSecond = await h.db.query<{ last_seen_at: Date }>(
+      "SELECT last_seen_at FROM sessions WHERE id = $1",
+      [s.session.id]
+    );
+    expect(afterSecond.rows[0].last_seen_at.getTime()).toBe(t1.getTime());
+    // Past the granularity → refresh resumes and the idle deadline extends.
+    const t3 = new Date(t1.getTime() + 6 * 60_000);
+    expect((await validateSession(h.db, s.token, t3)).ok).toBe(true);
+    const afterThird = await h.db.query<{ last_seen_at: Date; idle_expires_at: Date }>(
+      "SELECT last_seen_at, idle_expires_at FROM sessions WHERE id = $1",
+      [s.session.id]
+    );
+    expect(afterThird.rows[0].last_seen_at.getTime()).toBe(t3.getTime());
+    expect(afterThird.rows[0].idle_expires_at.getTime()).toBe(t3.getTime() + 7 * DAY_MS);
+  });
 });
 
 describe("immediate revocation", () => {

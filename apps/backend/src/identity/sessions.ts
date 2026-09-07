@@ -40,15 +40,16 @@ export async function createSession(
   const token = generateToken();
   const inserted = await db.query<SessionRow>(
     `INSERT INTO sessions
-       (account_id, role, token_hash, absolute_expires_at, idle_expires_at)
-     VALUES ($1, $2, $3, $4, $5)
+       (account_id, role, token_hash, absolute_expires_at, idle_expires_at, last_seen_at)
+     VALUES ($1, $2, $3, $4, $5, $6)
      RETURNING id, account_id, role`,
     [
       accountId,
       role,
       hashToken(token),
       new Date(now.getTime() + lifetime.absoluteMs),
-      new Date(now.getTime() + lifetime.idleMs)
+      new Date(now.getTime() + lifetime.idleMs),
+      now
     ]
   );
   await recordAudit(db, {
@@ -78,13 +79,14 @@ export async function validateSession(
     SessionRow & {
       absolute_expires_at: Date;
       idle_expires_at: Date;
+      last_seen_at: Date;
       revoked_at: Date | null;
       account_state: "active" | "suspended" | "closed";
       account_is_admin: boolean;
     }
   >(
     `SELECT s.id, s.account_id, s.role, s.absolute_expires_at, s.idle_expires_at,
-            s.revoked_at, a.state AS account_state, a.is_admin AS account_is_admin
+            s.last_seen_at, s.revoked_at, a.state AS account_state, a.is_admin AS account_is_admin
        FROM sessions s JOIN accounts a ON a.id = s.account_id
       WHERE s.token_hash = $1`,
     [hashToken(rawToken)]
@@ -124,11 +126,18 @@ export async function validateSession(
       : config.identity.userSessionIdleDays * DAY_MS;
   const newIdle = new Date(now.getTime() + idleMs);
   if (newIdle.getTime() < row.idle_expires_at.getTime()) newIdle.setTime(row.idle_expires_at.getTime());
-  await db.query("UPDATE sessions SET last_seen_at = $2, idle_expires_at = $3 WHERE id = $1", [
-    row.id,
-    now,
-    newIdle
-  ]);
+  // M8: lazy idle-write — skip the UPDATE when a recent validation already
+  // refreshed the window (5-minute granularity). The idle deadline stays
+  // exact to within the granularity, and steady traffic drops from one write
+  // per request to ~one per 5 minutes per session.
+  const lastSeen = row.last_seen_at instanceof Date ? row.last_seen_at : new Date(row.last_seen_at);
+  if (now.getTime() - lastSeen.getTime() >= 5 * MINUTE_MS) {
+    await db.query("UPDATE sessions SET last_seen_at = $2, idle_expires_at = $3 WHERE id = $1", [
+      row.id,
+      now,
+      newIdle
+    ]);
+  }
   return { ok: true, session: { id: row.id, account_id: row.account_id, role } };
 }
 
