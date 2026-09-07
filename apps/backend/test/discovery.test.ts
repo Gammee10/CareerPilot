@@ -254,4 +254,59 @@ describe("supersession at start (ADR-045)", () => {
   });
 });
 
+describe("run targets (H5)", () => {
+  it("intake records the allowed source set; terminal attempts auto-complete the run", async () => {
+    const user = await createUser();
+    const first = await requestDiscoveryRun(db, user, "manual", t0);
+    expect(first.outcome).toBe("started");
+    if (!("runId" in first)) throw Error("setup");
+    const run = await db.query<{ targeted_sources: string[] }>(
+      "SELECT targeted_sources FROM discovery_runs WHERE id = $1",
+      [first.runId]
+    );
+    expect([...run.rows[0].targeted_sources].sort()).toEqual([
+      "greenhouse",
+      "lever",
+      "remoteok"
+    ]);
+
+    const start = await startQueuedRun(db, first.runId, t0);
+    expect(start.ok).toBe(true);
+    for (const slug of ["greenhouse", "lever", "remoteok"]) {
+      await db.query(
+        `INSERT INTO source_collection_attempts
+           (discovery_run_id, job_source_slug, attempt_number, page_budget, timeout_ms, status, started_at)
+         VALUES ($1, $2, 1, 5, 10000, 'succeeded', $3)`,
+        [first.runId, slug, t0]
+      );
+    }
+    const { checkAndCompleteRun } = await import("../src/discovery/orchestrator.js");
+    await checkAndCompleteRun(db, first.runId, t0);
+    const status = await db.query<{ status: string }>(
+      "SELECT status FROM discovery_runs WHERE id = $1",
+      [first.runId]
+    );
+    expect(status.rows[0].status).toBe("complete");
+  });
+
+  it("a disabled source is excluded from the declared targets", async () => {
+    await db.query("UPDATE job_sources SET enabled = false WHERE slug = 'lever'");
+    try {
+      const user = await createUser();
+      const first = await requestDiscoveryRun(db, user, "manual", t0);
+      if (!("runId" in first)) throw Error("setup");
+      const run = await db.query<{ targeted_sources: string[] }>(
+        "SELECT targeted_sources FROM discovery_runs WHERE id = $1",
+        [first.runId]
+      );
+      expect([...run.rows[0].targeted_sources].sort()).toEqual([
+        "greenhouse",
+        "remoteok"
+      ]);
+    } finally {
+      await db.query("UPDATE job_sources SET enabled = true WHERE slug = 'lever'");
+    }
+  });
+});
+
 void makeTestPool;

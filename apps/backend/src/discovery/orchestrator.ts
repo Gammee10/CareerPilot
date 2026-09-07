@@ -124,6 +124,23 @@ export async function requestDiscoveryRun(
 
 type IntakeDb = Pool | import("pg").PoolClient;
 
+// Sources a run actually targets (H5): enabled + terms-validated (T4.0 gate)
+// adapter-backed slugs. `url_import` is user-driven and never auto-targeted —
+// including it would stall auto-complete since no collection job can produce
+// a terminal attempt for it.
+export const COLLECTIBLE_SOURCE_SLUGS = ["greenhouse", "lever", "remoteok"] as const;
+
+export async function listTargetedSources(db: IntakeDb): Promise<string[]> {
+  const rows = await db.query<{ slug: string }>(
+    `SELECT slug FROM job_sources
+      WHERE enabled AND terms_validation_recorded_at IS NOT NULL
+        AND slug = ANY($1)
+      ORDER BY slug`,
+    [Array.from(COLLECTIBLE_SOURCE_SLUGS)]
+  );
+  return rows.rows.map((r) => r.slug);
+}
+
 async function intake(
   db: IntakeDb,
   accountId: string,
@@ -163,9 +180,13 @@ async function intake(
 
   const profileVersionId = await latestProfileVersion(db, accountId);
   if (!profileVersionId) {
-    // No approved profile yet â€” nothing to discover for.
+    // No approved profile yet — nothing to discover for.
     return { outcome: "account_inactive" };
   }
+
+  // Declared completion targets (H5): the enabled/allowed source set at
+  // intake, so checkAndCompleteRun auto-completes from terminal attempts.
+  const targets = await listTargetedSources(db);
 
   if (active) {
     // ADR-042: at most ONE follow-up may exist; requests coalesce into it.
@@ -180,12 +201,13 @@ async function intake(
         return { outcome: "coalesced", runId: followup.rows[0].id };
       }
       const inserted = await db.query<{ id: string }>(
-        `INSERT INTO discovery_runs (account_id, profile_version_id, trigger_source, coalesced_reasons, created_at)
-         VALUES ($1, $2, $3, $4, $5) RETURNING id`,
+        `INSERT INTO discovery_runs (account_id, profile_version_id, trigger_source, targeted_sources, coalesced_reasons, created_at)
+         VALUES ($1, $2, $3, $4, $5, $6) RETURNING id`,
         [
           accountId,
           profileVersionId,
           trigger,
+          JSON.stringify(targets),
           JSON.stringify([`followup_for:${active.id}`, `trigger:${trigger}`]),
           now
         ]
@@ -199,9 +221,9 @@ async function intake(
   }
 
   const inserted = await db.query<{ id: string }>(
-    `INSERT INTO discovery_runs (account_id, profile_version_id, trigger_source, created_at)
-     VALUES ($1, $2, $3, $4) RETURNING id`,
-    [accountId, profileVersionId, trigger, now]
+    `INSERT INTO discovery_runs (account_id, profile_version_id, trigger_source, targeted_sources, created_at)
+     VALUES ($1, $2, $3, $4, $5) RETURNING id`,
+    [accountId, profileVersionId, trigger, JSON.stringify(targets), now]
   );
   return { outcome: "started", runId: inserted.rows[0].id };
 }

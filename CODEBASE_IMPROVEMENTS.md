@@ -360,6 +360,12 @@ Most important areas requiring attention:
   `[]` rows from `source_collection_attempts` or mark unknown as NULL. Add a test:
   terminal attempts → run completes with correct status.
 - **Suggested validation:** Discovery test asserting auto-complete on terminal attempts.
+- **Status: Completed 2026-09-07** — intake records `targeted_sources` from the
+  enabled + terms-validated adapter set (`listTargetedSources`, shared for the
+  future fan-out driver; `url_import` excluded as user-driven); tests cover
+  target declaration, terminal-attempt auto-complete, and disabled-source
+  exclusion. No backfill needed (pre-onboarding; `[]` retains its
+  driver-completes-explicitly meaning).
 
 ### H6. Dashboard list is N+1 with no pagination
 
