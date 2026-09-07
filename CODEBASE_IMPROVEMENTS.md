@@ -516,6 +516,12 @@ Most important areas requiring attention:
   set and clear paths.
 - **Suggested validation:** Cookie-flag tests (Secure in prod, HttpOnly always,
   SameSite=Lax, Max-Age≈30d); manual logout clears cookie in prod-mode fixture.
+- **Status: Completed 2026-09-07** — single `sessionCookieOptions()` helper
+  (name from `config.sessionCookieName`, `Max-Age=2592000` for the 30-day
+  absolute lifetime) used by both set and clear; logout clear mirrors
+  Secure/SameSite/Path with `Max-Age=0`; auth middleware reads the same config
+  constant. Test asserts flags on redeem + mirrored clear on logout.
+  (Secure flag is production-only by design — local dev stays plain HTTP.)
 
 ### H12. Backup encryption is non-authenticated CBC; bucket object never re-verified
 

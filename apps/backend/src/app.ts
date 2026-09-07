@@ -78,11 +78,30 @@ export type AppDeps = {
 
 const GENERIC_LINK_FAILURE = { error: "invalid_link" };
 
+// Single session-cookie definition (H11): Max-Age mirrors the 30-day user
+// absolute lifetime; Secure/SameSite/Path are identical on set and clear so
+// a production Secure cookie cannot survive logout. The name comes from the
+// shared config constant — never a hardcoded duplicate.
+const SESSION_MAX_AGE_SECONDS = 30 * 24 * 60 * 60;
+
+function sessionCookieOptions(): { name: string; attrs: string } {
+  const secure = config.nodeEnv === "production" ? "; Secure" : "";
+  return {
+    name: config.sessionCookieName,
+    attrs: `Path=/; HttpOnly; Max-Age=${SESSION_MAX_AGE_SECONDS}${secure}; SameSite=Lax`
+  };
+}
+
 function setSessionCookie(res: Response, token: string): void {
-  const secure = config.nodeEnv === "production" ? " Secure;" : "";
+  const { name, attrs } = sessionCookieOptions();
+  res.setHeader("Set-Cookie", `${name}=${encodeURIComponent(token)}; ${attrs}`);
+}
+
+function clearSessionCookie(res: Response): void {
+  const secure = config.nodeEnv === "production" ? "; Secure" : "";
   res.setHeader(
     "Set-Cookie",
-    `cp_session=${encodeURIComponent(token)}; Path=/; HttpOnly;${secure} SameSite=Lax`
+    `${config.sessionCookieName}=; Path=/; HttpOnly; Max-Age=0${secure}; SameSite=Lax`
   );
 }
 
@@ -232,7 +251,7 @@ export function buildApp(deps: AppDeps): Express {
 
   app.post("/api/auth/logout", requireSession(db, nowFn), async (req, res) => {
     await revokeSession(db, req.auth!.sessionId, req.auth!.accountId, nowFn(), "logout");
-    res.clearCookie("cp_session", { path: "/" });
+    clearSessionCookie(res);
     res.status(200).json({ status: "signed_out" });
   });
 

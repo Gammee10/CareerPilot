@@ -79,4 +79,49 @@ describe("HTTP hardening (H10)", () => {
       expect(retryAfter).toBe("60");
     });
   }, 30_000);
+
+  it("H11: session cookie carries flags; logout clears with mirrored attributes", async () => {
+    // Fixed clock: link validity is time-bound, so this test needs its own
+    // harness like the other auth suites (the file-level harness uses real
+    // time, which would expiry-fail a fixed-t0 link).
+    const { createBootstrapAdmin, createActiveUser, makeHarness: makeFixedHarness, resetDb: resetFixedDb } =
+      await import("./helpers.js");
+    const t0 = new Date("2026-08-23T12:00:00Z");
+    const fixed = makeFixedHarness(() => new Date(t0.getTime() + 60_000));
+    try {
+      await resetFixedDb(fixed.db);
+      const adminId = await createBootstrapAdmin(fixed.db, "admin@example.invalid");
+      await createActiveUser(fixed, "cookie@example.invalid", adminId, t0);
+      const { requestSignInLink, confirmSignInLink } = await import(
+        "../src/identity/signinLinks.js"
+      );
+      await withServer(fixed.app, async (port) => {
+        const link = await requestSignInLink(fixed.db, "cookie@example.invalid", t0);
+        if (!link.ok) throw Error("setup");
+        await confirmSignInLink(fixed.db, link.token, t0);
+        const redeem = await request(port, "POST", "/api/auth/signin-link/redeem", {
+          body: { token: link.token }
+        });
+        expect(redeem.status).toBe(200);
+      const setCookie = String(redeem.getHeader("set-cookie") ?? "");
+      expect(setCookie).toContain("cp_session=");
+      expect(setCookie).toContain("HttpOnly");
+      expect(setCookie).toContain("SameSite=Lax");
+      expect(setCookie).toContain("Path=/");
+      expect(setCookie).toContain("Max-Age=2592000"); // 30-day absolute lifetime
+
+      const cookie = setCookie.split(";")[0];
+      const logout = await request(port, "POST", "/api/auth/logout", { cookie });
+      expect(logout.status).toBe(200);
+      const cleared = String(logout.getHeader("set-cookie") ?? "");
+      expect(cleared).toContain("cp_session=;");
+      expect(cleared).toContain("Max-Age=0");
+      expect(cleared).toContain("Path=/");
+      expect(cleared).toContain("HttpOnly");
+      expect(cleared).toContain("SameSite=Lax");
+      });
+    } finally {
+      await fixed.close();
+    }
+  });
 });

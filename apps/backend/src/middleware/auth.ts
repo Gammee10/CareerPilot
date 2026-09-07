@@ -2,6 +2,7 @@
 // middleware (ADR-016).
 import type { NextFunction, Request, Response } from "express";
 import type { Pool } from "pg";
+import { config } from "../config.js";
 import { validateSession } from "../identity/sessions.js";
 
 export type AuthContext = {
@@ -30,7 +31,7 @@ export function extractSessionToken(req: Request): string | null {
   if (cookieHeader) {
     for (const part of cookieHeader.split(";")) {
       const [name, ...rest] = part.trim().split("=");
-      if (name === "cp_session") return decodeURIComponent(rest.join("="));
+      if (name === config.sessionCookieName) return decodeURIComponent(rest.join("="));
     }
   }
   return null;
