@@ -86,3 +86,23 @@ export function requireSelf(accountIdParam: string) {
     next();
   };
 }
+
+const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+export { UUID_RE };
+
+// UUID param guard (M6): malformed ids fail closed as 404 BEFORE any query,
+// instead of reaching pg as `invalid input syntax for type uuid` → 500
+// `internal_error` noise that masks real errors. 404 (not 400) keeps the
+// non-disclosing posture of requireSelf on the same routes.
+export function requireUuidParams(...names: string[]) {
+  return (req: Request, res: Response, next: NextFunction) => {
+    for (const name of names) {
+      const value = req.params[name];
+      if (value !== undefined && !UUID_RE.test(String(value))) {
+        res.status(404).json({ error: "not_found" });
+        return;
+      }
+    }
+    next();
+  };
+}

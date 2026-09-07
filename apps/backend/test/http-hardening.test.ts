@@ -1,9 +1,11 @@
-// H10 — HTTP hardening: security headers, body-limit handling, auth rate limits.
+// H10/H11/M6 — HTTP hardening: security headers, body-limit handling, auth
+// rate limits, cookie flags, UUID param guards.
 import { describe, it, expect, beforeEach, afterAll } from "vitest";
 import {
   makeHarness,
   resetDb,
   request,
+  sessionCookie,
   withServer,
   type Harness
 } from "./helpers.js";
@@ -80,8 +82,7 @@ describe("HTTP hardening (H10)", () => {
     });
   }, 30_000);
 
-  it("H11: session cookie carries flags; logout clears with mirrored attributes", async () => {
-    // Fixed clock: link validity is time-bound, so this test needs its own
+  it("H11: session cookie carries flags; logout clears with mirrored attributes", async () => {    // Fixed clock: link validity is time-bound, so this test needs its own
     // harness like the other auth suites (the file-level harness uses real
     // time, which would expiry-fail a fixed-t0 link).
     const { createBootstrapAdmin, createActiveUser, makeHarness: makeFixedHarness, resetDb: resetFixedDb } =
@@ -119,6 +120,46 @@ describe("HTTP hardening (H10)", () => {
       expect(cleared).toContain("Path=/");
       expect(cleared).toContain("HttpOnly");
       expect(cleared).toContain("SameSite=Lax");
+      });
+    } finally {
+      await fixed.close();
+    }
+  });
+
+  it("M6: malformed UUID params fail closed as 404, never 500", async () => {
+    const { createBootstrapAdmin, createActiveUser } = await import("./helpers.js");
+    const t0 = new Date("2026-08-23T12:00:00Z");
+    const fixed = makeHarness(() => new Date(t0.getTime() + 60_000));
+    try {
+      await resetDb(fixed.db);
+      const adminId = await createBootstrapAdmin(fixed.db, "admin@example.invalid");
+      const user = await createActiveUser(fixed, "uuid@example.invalid", adminId, t0);
+      const { requestSignInLink, confirmSignInLink } = await import(
+        "../src/identity/signinLinks.js"
+      );
+      const link = await requestSignInLink(fixed.db, "uuid@example.invalid", t0);
+      if (!link.ok) throw Error("setup");
+      await confirmSignInLink(fixed.db, link.token, t0);
+      await withServer(fixed.app, async (port) => {
+        const redeem = await request(port, "POST", "/api/auth/signin-link/redeem", {
+          body: { token: link.token }
+        });
+        const cookie = sessionCookie(redeem);
+        const cases: Array<[string, "GET" | "POST" | "PUT", unknown?]> = [
+          ["/api/account/not-a-uuid/jobs", "GET"],
+          [`/api/account/${user.accountId}/jobs/not-a-uuid/detail`, "GET"],
+          [`/api/account/${user.accountId}/resume/not-a-uuid/extract`, "POST"],
+          [`/api/account/${user.accountId}/extraction-drafts/not-a-uuid`, "GET"],
+          ["/api/admin/accounts/not-a-uuid/suspend", "POST"]
+        ];
+        for (const [path, method, body] of cases) {
+          const res = await request(port, method, path, {
+            cookie,
+            body: body ?? (method === "GET" ? undefined : {})
+          });
+          expect(res.status).toBe(404);
+          expect(res.body).toEqual({ error: "not_found" });
+        }
       });
     } finally {
       await fixed.close();

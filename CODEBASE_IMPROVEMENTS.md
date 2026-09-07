@@ -713,6 +713,13 @@ Most important areas requiring attention:
   type uuid` → 500 `internal_error`. Fail-closed but noisy and masks real errors.
 - **Recommended improvement:** Add a UUID param guard returning 400/404 before any query.
 - **Suggested validation:** Route tests with `not-a-uuid` asserting 400/404, never 500.
+- **Status: Completed 2026-09-07** — path-scanning global guard returns
+  non-disclosing 404 for malformed `:accountId`/`:jobId`/`:documentId`/
+  `:draftId`/`:id` before any query (grant/link tokens are opaque strings and
+  unaffected). Implementation note: per-path `app.use()` mounts were rejected
+  — Express strips use-mount prefixes from downstream route matching and broke
+  every account route (caught by the storage suite). Route tests assert 404 +
+  `{error:not_found}` on five shapes, never 500.
 
 ### M7. Draft edit/accept TOCTOU + conflated 404/409
 

@@ -5,7 +5,7 @@ import helmet from "helmet";
 import { rateLimit } from "express-rate-limit";
 import type { Pool } from "pg";
 import { config } from "./config.js";
-import { requireAdmin, requireSelf, requireSession } from "./middleware/auth.js";
+import { requireAdmin, requireSelf, requireSession, UUID_RE } from "./middleware/auth.js";
 import { recordAudit } from "./identity/audit.js";
 import {
   acceptInvitation,
@@ -169,6 +169,28 @@ export function buildApp(deps: AppDeps): Express {
   app.use("/api/auth/invitation/redeem", authLimiter(100));
   app.use("/api/auth/closure/confirm", authLimiter(100));
   app.use("/api/auth/closure/redeem", authLimiter(100));
+  // M6: malformed UUID params fail closed as 404 before any query (never a
+  // pg `invalid input syntax` 500). Implemented as a path-scanning global
+  // middleware: `app.use(path, …)` mounts cannot be used here because Express
+  // strips a use()-mount prefix from downstream route matching. Grant tokens
+  // and link tokens are opaque strings, not UUIDs, and are never matched.
+  const UUID_PARAM_PATTERNS = [
+    /\/account\/([^/]+)/, // :accountId
+    /\/jobs\/([^/]+)\/(?:detail|review|evaluate)/, // :jobId
+    /\/resume\/([^/]+)\/(?:download-grant|extract)/, // :documentId
+    /\/extraction-drafts\/([^/]+)/, // :draftId
+    /\/admin\/(?:accounts|invitations|role-changes)\/([^/]+)/ // :id
+  ];
+  app.use((req: Request, res: Response, next: NextFunction) => {
+    for (const pattern of UUID_PARAM_PATTERNS) {
+      const match = req.path.match(pattern);
+      if (match && !UUID_RE.test(match[match.length - 1])) {
+        res.status(404).json({ error: "not_found" });
+        return;
+      }
+    }
+    next();
+  });
 
   // Liveness: process is up; no dependency checks, no sensitive detail.
   app.get("/healthz", (_req, res) => {
