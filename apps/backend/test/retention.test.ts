@@ -150,4 +150,75 @@ describe("retention sweeps", () => {
     expect(rows.rows.find((r) => r.storage_key === "k-old")!.deleted_at).not.toBeNull();
     expect(rows.rows.find((r) => r.storage_key === "k-fresh")!.deleted_at).toBeNull();
   });
+
+  it("sweep spares referenced + latest observations, deletes only unreferenced non-latest (C8)", async () => {
+    const acct = await db.query<{ id: string }>(
+      `INSERT INTO accounts (email, state) VALUES ('c8@example.invalid', 'active') RETURNING id`
+    );
+    const accountId = acct.rows[0].id;
+    await db.query(
+      `INSERT INTO profile_versions (account_id, version_number, source, content)
+       VALUES ($1, 1, 'manual', '{}')`,
+      [accountId]
+    );
+    await db.query(
+      `INSERT INTO career_profiles (account_id, current_profile_version_id)
+       SELECT $1, id FROM profile_versions WHERE account_id = $1`,
+      [accountId]
+    );
+    const job = await db.query<{ id: string }>(
+      "INSERT INTO canonical_jobs DEFAULT VALUES RETURNING id"
+    );
+    await db.query(
+      `INSERT INTO source_listings (id, job_source_slug, external_listing_key, canonical_job_id)
+       VALUES ('00000000-0000-4000-8000-00000000ac01', 'greenhouse', 'c8-key', $1)`,
+      [job.rows[0].id]
+    );
+    // Three old observations: referenced + latest + plain old.
+    const obs = await db.query<{ id: string; content_hash: string }>(
+      `INSERT INTO source_listing_observations
+         (source_listing_id, observed_at, availability_signal, content_hash, provenance)
+       VALUES ('00000000-0000-4000-8000-00000000ac01', $1, 'active', 'c8-old', '{}'),
+              ('00000000-0000-4000-8000-00000000ac01', $2, 'active', 'c8-latest', '{}'),
+              ('00000000-0000-4000-8000-00000000ac01', $3, 'active', 'c8-plain', '{}')
+       RETURNING id, content_hash`,
+      [
+        new Date(t0.getTime() - 200 * DAY),
+        new Date(t0.getTime() - 190 * DAY),
+        new Date(t0.getTime() - 210 * DAY)
+      ]
+    );
+    const byHash = Object.fromEntries(obs.rows.map((r) => [r.content_hash, r.id]));
+    const { createEvaluationSnapshot } = await import("../src/evaluation/snapshot.js");
+    const pv = await db.query<{ id: string }>(
+      "SELECT current_profile_version_id AS id FROM career_profiles WHERE account_id = $1",
+      [accountId]
+    );
+    await createEvaluationSnapshot(
+      db,
+      {
+        accountId,
+        canonicalJobId: job.rows[0].id,
+        profileVersionId: pv.rows[0].id,
+        inputObservationId: byHash["c8-old"],
+        eligibility: "confirmed",
+        constraintFailures: [],
+        dimensions: [],
+        explanation: [],
+        score: 60
+      },
+      t0
+    );
+
+    await runRetentionSweep(db, t0);
+
+    const remaining = await db.query<{ content_hash: string }>(
+      "SELECT content_hash FROM source_listing_observations"
+    );
+    const hashes = remaining.rows.map((r) => r.content_hash).sort();
+    // Referenced evidence + the listing's current latest survive; only the
+    // superseded, unreferenced row is swept.
+    expect(hashes).toEqual(["c8-latest", "c8-old"]);
+    void byHash["c8-plain"];
+  });
 });

@@ -73,6 +73,10 @@ export async function runRetentionSweep(
   }
 
   // Shared job data (ADR-021): observations + availability older than 180 days.
+  // Guards (C8/ADR-037): never delete an observation referenced by an
+  // evaluation snapshot (historical evidence) or the current latest
+  // observation of a live listing (compatible-current selection depends on
+  // it). The evaluations FK (default NO ACTION) backstops the first guard.
   const sharedCutoff = new Date(now.getTime() - 180 * DAY_MS);
   const availabilityDeleted = await sweepStatement(
     db,
@@ -81,7 +85,17 @@ export async function runRetentionSweep(
   );
   const sharedObservationsDeleted = await sweepStatement(
     db,
-    `DELETE FROM source_listing_observations WHERE observed_at < $1`,
+    `DELETE FROM source_listing_observations o
+      WHERE o.observed_at < $1
+        AND NOT EXISTS (
+          SELECT 1 FROM evaluations e WHERE e.input_observation_id = o.id
+        )
+        AND o.id <> (
+          SELECT latest.id FROM source_listing_observations latest
+           WHERE latest.source_listing_id = o.source_listing_id
+           ORDER BY latest.observed_at DESC, latest.id DESC
+           LIMIT 1
+        )`,
     [sharedCutoff]
   );
 

@@ -249,6 +249,12 @@ Most important areas requiring attention:
      (must survive) vs unreferenced old observation (may be swept).
 - **Suggested validation:** Retention test covering both cases; schema test for the
   FK behavior.
+- **Status: Completed 2026-09-07** — the 180-day observation sweep now skips
+  rows referenced by `evaluations.input_observation_id` and each listing's
+  current latest observation (`observed_at DESC, id DESC`); verified the FK
+  carries no `ON DELETE` action (default NO ACTION = restrict-equivalent
+  backstop). Test covers referenced-survives / latest-survives /
+  unreferenced-non-latest-swept.
 
 ---
 
