@@ -166,6 +166,9 @@ Most important areas requiring attention:
   (single `SELECT 1 … WHERE account_id AND canonical_job_id`); index already exists
   via evaluations table — verify. Add cross-account detail test.
 - **Suggested validation:** Cross-account test: B fetches A's unevaluated job → 404.
+- **Status: Completed 2026-09-07** — `getJobDetail` requires an `evaluations`
+  or `user_job_reviews` row for `(accountId, jobId)` first, else non-disclosing
+  null (route → 404); owner path unaffected; cross-account detail test added.
 
 ### C6. Source-collection pacing is a no-op (rate limit never actually waits)
 

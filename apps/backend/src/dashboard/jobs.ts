@@ -93,6 +93,17 @@ export async function getJobDetail(
   accountId: string,
   canonicalJobId: string
 ): Promise<JobDetail | null> {
+  // Ownership gate (C5): the caller must have an evaluation or review row for
+  // this job; otherwise fail closed as not-found (non-disclosing 404).
+  const scope = await db.query<{ one: number }>(
+    `SELECT 1 AS one FROM evaluations WHERE account_id = $1 AND canonical_job_id = $2
+      UNION
+     SELECT 1 AS one FROM user_job_reviews WHERE account_id = $1 AND canonical_job_id = $2
+     LIMIT 1`,
+    [accountId, canonicalJobId]
+  );
+  if (scope.rows.length === 0) return null;
+
   const view = await loadJobView(db, canonicalJobId);
   if (!view) return null;
 

@@ -152,6 +152,24 @@ describe("T7.1 â€” isolation across the dashboard surface", () => {
       expect(res.status).toBe(401);
     });
   });
+
+  it("job detail for another account's unevaluated job returns 404 (C5)", async () => {
+    const owner = await signIn("c5owner@example.invalid");
+    const attacker = await signIn("c5attacker@example.invalid");
+    const jobId = await seedEvaluatedJob(owner.accountId);
+    await withServer(h.app, async (port) => {
+      const denied = await request(
+        port, "GET", `/api/account/${attacker.accountId}/jobs/${jobId}/detail`,
+        { cookie: attacker.cookie }
+      );
+      expect(denied.status).toBe(404);
+      const allowed = await request(
+        port, "GET", `/api/account/${owner.accountId}/jobs/${jobId}/detail`,
+        { cookie: owner.cookie }
+      );
+      expect(allowed.status).toBe(200);
+    });
+  });
 });
 
 describe("T7.2 â€” job views and review lifecycle", () => {
