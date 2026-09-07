@@ -21,6 +21,11 @@ declare global {
 }
 
 export function extractSessionToken(req: Request): string | null {
+  // HttpOnly session cookie ONLY (H2). A previous Bearer-token branch was
+  // removed: accepting session tokens in JS-readable headers encouraged them
+  // into logs/proxies/storage and defeated the HttpOnly cookie. Server-to-
+  // server internal auth (AI capability, Resend) uses separate file-mounted
+  // secrets, never user sessions.
   const cookieHeader = req.headers.cookie;
   if (cookieHeader) {
     for (const part of cookieHeader.split(";")) {
@@ -28,8 +33,6 @@ export function extractSessionToken(req: Request): string | null {
       if (name === "cp_session") return decodeURIComponent(rest.join("="));
     }
   }
-  const authorization = req.headers.authorization;
-  if (authorization?.startsWith("Bearer ")) return authorization.slice(7);
   return null;
 }
 

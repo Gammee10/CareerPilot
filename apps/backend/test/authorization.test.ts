@@ -66,7 +66,7 @@ async function setupUsers(port: number): Promise<Users> {
   expect(redeemA.status).toBe(200);
   expect(redeemB.status).toBe(200);
 
-  // Admin session created directly via service layer; token used as bearer.
+  // Admin session created directly via service layer; presented as cookie.
   const { createSession } = await import("../src/identity/sessions.js");
   const adminSession = await createSession(h.db, adminId, "admin", t0);
 
@@ -161,6 +161,25 @@ describe("deny-by-default isolation", () => {
         cookie: users.userACookie
       });
       expect(afterLogout.status).toBe(401);
+    });
+  });
+
+  it("Authorization Bearer header alone does not authenticate (H2)", async () => {
+    await withServer(h.app, async (port) => {
+      const users = await setupUsers(port);
+      const rawToken = decodeURIComponent(
+        users.userACookie.slice("cp_session=".length)
+      );
+      // The same token in the cookie authenticates…
+      const viaCookie = await request(users.port, "GET", "/api/me", {
+        cookie: users.userACookie
+      });
+      expect(viaCookie.status).toBe(200);
+      // …but presented as a Bearer header it must not.
+      const viaBearer = await request(users.port, "GET", "/api/me", {
+        headers: { authorization: `Bearer ${rawToken}` }
+      });
+      expect(viaBearer.status).toBe(401);
     });
   });
 });

@@ -278,6 +278,11 @@ Most important areas requiring attention:
   in the logger.
 - **Suggested validation:** Test that `Authorization` header alone no longer
   authenticates (or is explicitly scoped); manual header review.
+- **Status: Completed 2026-09-07** — Bearer branch removed from
+  `extractSessionToken`; HttpOnly cookie is the sole session credential
+  (internal AI/Resend auth uses separate file-mounted secrets). Test asserts
+  Bearer-alone → 401 while the same token as cookie → 200; no callers used
+  Bearer (verified by grep over backend + frontend).
 
 ### H3. Non-atomic link redemption breaks retry (closure + sign-in)
 

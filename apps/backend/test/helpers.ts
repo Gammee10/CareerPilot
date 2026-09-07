@@ -75,13 +75,14 @@ export async function request(
   port: number,
   method: "GET" | "POST",
   pathUrl: string,
-  opts?: { body?: unknown; cookie?: string }
+  opts?: { body?: unknown; cookie?: string; headers?: Record<string, string> }
 ): Promise<TestResponse> {
   const res = await fetch(`http://127.0.0.1:${port}${pathUrl}`, {
     method,
     headers: {
       "content-type": "application/json",
-      ...(opts?.cookie ? { cookie: opts.cookie } : {})
+      ...(opts?.cookie ? { cookie: opts.cookie } : {}),
+      ...(opts?.headers ?? {})
     },
     body: opts?.body === undefined ? undefined : JSON.stringify(opts.body)
   });
