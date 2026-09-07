@@ -12,6 +12,8 @@
   },
   "dependencies": {
     "express": "^5.1.0",
+    "express-rate-limit": "^8.7.0",
+    "helmet": "^8.3.0",
     "pg": "^8.13.0",
     "pg-boss": "^10.4.2",
     "tsx": "^4.19.0"

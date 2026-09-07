@@ -8,6 +8,18 @@
 {$DOMAIN} {
 	encode zstd gzip
 
+	# Transport hardening headers at the edge (H10). HSTS only here — never
+	# on the plain-HTTP dev listener. See the dev Caddyfile for the shared
+	# rationale.
+	header {
+		Strict-Transport-Security "max-age=31536000; includeSubDomains"
+		X-Content-Type-Options nosniff
+		X-Frame-Options DENY
+		Referrer-Policy strict-origin-when-cross-origin
+		Permissions-Policy "camera=(), microphone=(), geolocation=()"
+		-Server
+	}
+
 	# Authoritative application API (prefix stripped before proxying).
 	handle_path /api/* {
 		reverse_proxy backend:8080

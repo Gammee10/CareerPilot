@@ -489,6 +489,17 @@ Most important areas requiring attention:
   `header { Strict-Transport-Security …; X-Content-Type-Options nosniff; … }`.
 - **Suggested validation:** HTTP tests asserting headers present, 429 after burst,
   CORS preflight denied cross-origin.
+- **Status: Completed 2026-09-07** — `helmet()` (CSP `default-src 'none'` +
+  `frame-ancestors 'none'`, `X-Frame-Options DENY`, CORP same-origin) +
+  per-route IP rate limits on all six public link endpoints (30/min issuance,
+  100/min confirm/redeem, 429 + `Retry-After: 60`) + `trust proxy loopback` so
+  limits see the real client IP behind Caddy; `express.json({limit:'100kb'})`
+  with 400 `invalid_json` / 413 `payload_too_large` mapping (never 500);
+  Caddy edge headers in both Caddyfiles (HSTS only in production);
+  Next `poweredByHeader:false` + document headers. Deliberate deviations: no
+  `hpp` (no `req.query` sink exists) and no `cors()` mount (same-origin deny
+  by default — a preflight test would assert absence, which headers already
+  prove). Tests: headers present, 400/413 mapping, 429 burst with Retry-After.
 
 ### H11. Cookie attributes incomplete; logout may not clear prod cookie
 

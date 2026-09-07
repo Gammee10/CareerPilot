@@ -8,6 +8,17 @@
 :80 {
 	encode zstd gzip
 
+	# Transport hardening headers at the edge (H10). Tokens ride in URLs on
+	# the passwordless flows, so the Referrer-Policy never leaks full URLs
+	# cross-origin; framing is denied (the app has no embed use case).
+	header {
+		X-Content-Type-Options nosniff
+		X-Frame-Options DENY
+		Referrer-Policy strict-origin-when-cross-origin
+		Permissions-Policy "camera=(), microphone=(), geolocation=()"
+		-Server
+	}
+
 	# Authoritative application API (prefix stripped before proxying).
 	handle_path /api/* {
 		reverse_proxy backend:8080

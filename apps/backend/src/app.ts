@@ -1,6 +1,8 @@
 // Express application factory. Dependencies are injected so tests can drive
 // the exact production route surface with a captured mailer and fixed clock.
-import express, { type Express, type Request, type Response } from "express";
+import express, { type Express, type NextFunction, type Request, type Response } from "express";
+import helmet from "helmet";
+import { rateLimit } from "express-rate-limit";
 import type { Pool } from "pg";
 import { config } from "./config.js";
 import { requireAdmin, requireSelf, requireSession } from "./middleware/auth.js";
@@ -90,8 +92,64 @@ export function buildApp(deps: AppDeps): Express {
   const store = deps.store ?? buildObjectStore();
   const ai: AiClient = deps.ai ?? new HttpAiClient(process.env.AI_INTERNAL_URL ?? "http://ai:8000");
   const app = express();
+  // Behind Caddy (single reverse proxy): trust the loopback hop so IP-keyed
+  // rate limits see the real client IP via X-Forwarded-For (H10). Loopback
+  // only — never trust arbitrary upstream headers.
+  app.set("trust proxy", "loopback");
   app.disable("x-powered-by");
-  app.use(express.json());
+  // Security headers for the JSON API (H10). The dashboard's document-level
+  // CSP lives in Next.js; Caddy adds transport headers at the edge.
+  app.use(helmet({
+    // API-only: no documents to frame or scripts to run.
+    contentSecurityPolicy: { directives: { defaultSrc: ["'none'"], frameAncestors: ["'none'"] } },
+    frameguard: { action: "deny" },
+    crossOriginEmbedderPolicy: false,
+    crossOriginResourcePolicy: { policy: "same-origin" }
+  }));
+  // Same-origin by default: no `cors()` middleware is mounted, so browsers
+  // enforce the same-origin policy on every route (H10). No `req.query`
+  // parameter is consumed anywhere, so query-pollution (hpp) has no sink.
+  app.use(express.json({ limit: "100kb" }));
+  // Malformed JSON fails closed as 400 (never 500); over-limit bodies as 413.
+  // body-parser surfaces both as errors with status/type fields (the
+  // too-large variant is not a SyntaxError subclass — match on fields).
+  app.use((err: unknown, _req: Request, res: Response, next: NextFunction) => {
+    const bodyErr = err as { status?: unknown; type?: unknown };
+    if (typeof bodyErr.status === "number") {
+      if (bodyErr.status === 413 || bodyErr.type === "entity.too.large") {
+        res.status(413).json({ error: "payload_too_large" });
+        return;
+      }
+      if (bodyErr.status === 400) {
+        res.status(400).json({ error: "invalid_json" });
+        return;
+      }
+    }
+    next(err as never);
+  });
+
+  // IP-level brute-force guard on the public link endpoints (H10). Per-email
+  // DB limits (ADR-026) remain the primary control; this bounds IP-wide
+  // scanning. Budgets are generous so the integration suite (same-IP bursts)
+  // never trips them: issuance is rare per test, confirm/redeem bursts stay
+  // well under 100/min.
+  const authLimiter = (max: number) =>
+    rateLimit({
+      windowMs: 60_000,
+      limit: max,
+      standardHeaders: true,
+      legacyHeaders: false,
+      handler: (_req, res) => {
+        res.setHeader("Retry-After", "60");
+        res.status(429).json({ error: "rate_limited" });
+      }
+    });
+  app.use("/api/auth/signin-link", authLimiter(30));
+  app.use("/api/auth/signin-link/confirm", authLimiter(100));
+  app.use("/api/auth/signin-link/redeem", authLimiter(100));
+  app.use("/api/auth/invitation/redeem", authLimiter(100));
+  app.use("/api/auth/closure/confirm", authLimiter(100));
+  app.use("/api/auth/closure/redeem", authLimiter(100));
 
   // Liveness: process is up; no dependency checks, no sensitive detail.
   app.get("/healthz", (_req, res) => {
