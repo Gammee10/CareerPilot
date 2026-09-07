@@ -443,6 +443,12 @@ Most important areas requiring attention:
   tests for object-body, empty-body, oversized-body, malformed-JSON cases.
 - **Suggested validation:** Adapter tests for all four shapes; collection test with
   oversized fixture → clean terminal failure, no retry storm.
+- **Status: Completed 2026-09-07** — RemoteOK non-array bodies throw terminal
+  `NonTransientError` (no TypeError retry storm), non-object entries skipped;
+  Greenhouse/Lever guard non-array payloads; 5 MB cap enforced in both the real
+  fetcher (content-length pre-check + post-read check) and `PoliteClient`;
+  malformed-but-200 JSON maps to terminal non-transient. Tests cover all four
+  shapes + oversized collection (single attempt, `failed_non_transient`).
 
 ### H9. Token-bearing URLs are captured by default access logs (minimization hole)
 

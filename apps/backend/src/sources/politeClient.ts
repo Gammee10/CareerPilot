@@ -19,6 +19,9 @@ export type PoliteOptions = {
 
 const DEFAULTS = { minIntervalMs: 1000, maxAttempts: 3, retryAfterCapMs: 60_000 };
 
+/** H8: single-response cap (5 MB) against worker OOM on large feeds. */
+export const MAX_RESPONSE_BYTES = 5 * 1024 * 1024;
+
 export class NonTransientError extends Error {
   constructor(public status: number) {
     super(`non_transient_http_${status}`);
@@ -56,8 +59,23 @@ export class PoliteClient {
       attempts += 1;
       const res = await this.transport(url);
 
+      // H8: over-cap bodies are terminal even when they arrive through an
+      // injected transport (tests) rather than the real fetcher.
+      if (res.body.length > MAX_RESPONSE_BYTES) {
+        throw new NonTransientError(413);
+      }
+
       if (res.status === 200) {
-        return { data: JSON.parse(res.body) as T, attempts };
+        // H8: malformed-but-200 bodies are terminal shape errors, not
+        // transient budget burn — a body that is not JSON will never become
+        // JSON on retry.
+        let parsed: unknown;
+        try {
+          parsed = JSON.parse(res.body);
+        } catch {
+          throw new NonTransientError(422);
+        }
+        return { data: parsed as T, attempts };
       }
 
       if ((res.status === 429 || res.status === 503) && attempts < maxAttempts) {

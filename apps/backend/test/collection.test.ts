@@ -258,6 +258,24 @@ describe("collection work unit", () => {
     // restore
     await db.query("UPDATE job_sources SET enabled = true WHERE slug='lever'");
   });
+
+  it("H8: oversized feed bodies fail terminal with a single attempt", async () => {
+    const user = await setupUserWithProfile();
+    const runId = await createRunningRun(user);
+    await db.query("UPDATE job_sources SET terms_validation_recorded_at = now() WHERE slug='greenhouse'");
+    const { MAX_RESPONSE_BYTES } = await import("../src/sources/politeClient.js");
+    let calls = 0;
+    const huge: Transport = async () => {
+      calls += 1;
+      return { status: 200, headers: {}, body: "x".repeat(MAX_RESPONSE_BYTES + 1) };
+    };
+    const result = await runCollectionJob(
+      { db, transport: huge, now, sleep: noSleep },
+      { runId, sourceSlug: "greenhouse", config: { boardToken: "acme" } }
+    );
+    expect(result.outcome).toBe("failed_non_transient");
+    expect(calls).toBe(1); // terminal shape error, no retry storm
+  });
 });
 
 // ---------------------------------------------------------------------------

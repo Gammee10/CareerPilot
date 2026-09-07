@@ -176,6 +176,23 @@ describe("politeness policy", () => {
     expect(calls.length).toBe(1); // single attempt only
   });
 
+  it("H8: malformed-but-200 JSON is terminal, never a retry storm", async () => {
+    const c = client(fakeTransport(() => ({ status: 200, headers: {}, body: "not json{{{[" })));
+    await expect(c.getJson("https://example.invalid/api")).rejects.toThrow(/non_transient/);
+    expect(calls.length).toBe(1);
+  });
+
+  it("H8: over-cap bodies are terminal without retries", async () => {
+    const { MAX_RESPONSE_BYTES } = await import("../src/sources/politeClient.js");
+    const c = client(fakeTransport(() => ({
+      status: 200,
+      headers: {},
+      body: "x".repeat(MAX_RESPONSE_BYTES + 1)
+    })));
+    await expect(c.getJson("https://example.invalid/api")).rejects.toThrow(/non_transient/);
+    expect(calls.length).toBe(1);
+  });
+
   it("exhausts at most three attempts on persistent transient errors", async () => {
     const c = client(fakeTransport(() => ({
       status: 503, headers: { "retry-after": "1" }, body: ""
@@ -214,5 +231,39 @@ describe("RemoteOK adapter", () => {
     expect(obs.applicationUrls.preferred).toBe(job.url);
     expect(obs.restrictions).toContain("remoteok_attribution_direct_link");
     expect(obs.provenance.legalNoticeAcknowledged).toBe(true);
+  });
+
+  it("H8: non-array RemoteOK bodies fail terminal, not with a TypeError storm", async () => {
+    const c = client(fakeTransport(() => ({
+      status: 200, headers: {}, body: JSON.stringify({ error: "feed moved" })
+    })));
+    await expect(
+      remoteokAdapter().collect({ client: c, pageBudget: 1, fetchedAt: "2026-08-23T12:00:00Z" })
+    ).rejects.toThrow(/non_transient/);
+    expect(calls.length).toBe(1);
+  });
+
+  it("H8: non-object feed entries are skipped, never crash the collection", async () => {
+    const c = client(fakeTransport(() => ({
+      status: 200,
+      headers: {},
+      body: JSON.stringify([
+        { legal: "notice" },
+        "a string entry",
+        42,
+        null,
+        {
+          slug: "good-job",
+          position: "Engineer",
+          company: "Acme",
+          url: "https://remoteok.com/remote-jobs/good-job"
+        }
+      ])
+    })));
+    const result = await remoteokAdapter().collect({
+      client: c, pageBudget: 1, fetchedAt: "2026-08-23T12:00:00Z"
+    });
+    expect(result.observations).toHaveLength(1);
+    expect(result.observations[0].externalListingKey).toBe("good-job");
   });
 });

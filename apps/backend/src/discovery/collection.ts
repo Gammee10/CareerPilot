@@ -1,7 +1,7 @@
 ﻿// Source-collection work unit (T5.1/T5.5/T5.6): one job = one source within
 // one discovery run. Idempotent identity: collection:{runId}:{sourceSlug}.
 import type { Pool } from "pg";
-import { PoliteClient, NonTransientError, AttemptsExhaustedError, type Sleep, type Transport } from "../sources/politeClient.js";
+import { PoliteClient, NonTransientError, AttemptsExhaustedError, MAX_RESPONSE_BYTES, type Sleep, type Transport } from "../sources/politeClient.js";
 import { buildAdapter } from "../sources/registry.js";
 import { checkCollectionAllowed } from "../sources/registry.js";
 import type { SourceSlug } from "../sources/contract.js";
@@ -14,6 +14,9 @@ export type CollectionPayload = {
   sourceSlug: SourceSlug;
   config: Record<string, string>;
 };
+
+/** H8: single-feed response cap, shared with PoliteClient (see its export). */
+export { MAX_RESPONSE_BYTES };
 
 export type CollectionDeps = {
   db: Pool;
@@ -48,7 +51,18 @@ function defaultTransport(): Transport {
     res.headers.forEach((v, k) => {
       headers[k.toLowerCase()] = v;
     });
-    return { status: res.status, headers, body: await res.text() };
+    // H8: byte cap against large/compromised feeds (worker OOM guard). The
+    // declared length is checked BEFORE reading the body; the actual length
+    // is checked after. Over-cap feeds are terminal (never retried).
+    const declared = Number(headers["content-length"]);
+    if (Number.isFinite(declared) && declared > MAX_RESPONSE_BYTES) {
+      throw new NonTransientError(413);
+    }
+    const body = await res.text();
+    if (body.length > MAX_RESPONSE_BYTES) {
+      throw new NonTransientError(413);
+    }
+    return { status: res.status, headers, body };
   };
 }
 

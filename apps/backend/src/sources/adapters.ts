@@ -1,7 +1,7 @@
 // Source adapters (T4.1, ADR-011/059). Each adapter translates source schema
 // into contract observations and captures provenance + restrictions.
 import type { PoliteClient } from "./politeClient.js";
-import { collectPages } from "./politeClient.js";
+import { collectPages, NonTransientError } from "./politeClient.js";
 import type { SourceObservation } from "./contract.js";
 
 export type AdapterContext = {
@@ -46,7 +46,9 @@ export function greenhouseAdapter(config: { boardToken: string }): Adapter {
         const { data } = await client.getJson<{ jobs?: GreenhouseJob[] }>(
           `${base}?content=true`
         );
-        const items = data.jobs ?? [];
+        // H8: unexpected shapes are terminal, never a retry storm. A non-array
+        // jobs payload cannot paginate — treat as empty, not an exception.
+        const items = Array.isArray(data.jobs) ? data.jobs : [];
         // The list endpoint returns the full board; pagination budget still
         // bounds us if a paginated deployment is used later.
         return { items, hasMore: false };
@@ -98,7 +100,10 @@ export function leverAdapter(config: { site: string }): Adapter {
           `?mode=json&skip=${skip}&limit=50`;
         const { data } = await client.getJson<LeverPosting[]>(url);
         pagesFetched += 0; // counted by outer wrapper below
-        return { items: data ?? [], hasMore: (data ?? []).length === 50 };
+        // H8: non-array payloads are terminal shape errors upstream; an empty
+        // page here simply ends pagination.
+        const items = Array.isArray(data) ? data : [];
+        return { items, hasMore: items.length === 50 };
       });
       void pagesFetched;
 
@@ -128,14 +133,15 @@ export function leverAdapter(config: { site: string }): Adapter {
 // RemoteOK — public feed with binding attribution conditions
 // (see docs/dev/source-terms.md#remoteok)
 // ---------------------------------------------------------------------------
-type RemoteOkJob = Record<string, unknown> & {
-  slug?: string;
-  position?: string;
-  company?: string;
-  location?: string;
-  url?: string;
-  date?: string;
-  description?: string;
+type RemoteOkEntry = {
+  slug?: unknown;
+  id?: unknown;
+  position?: unknown;
+  company?: unknown;
+  location?: unknown;
+  url?: unknown;
+  date?: unknown;
+  description?: unknown;
 };
 
 const REMOTEOK_RESTRICTIONS = ["remoteok_attribution_direct_link", "remoteok_no_logo"];
@@ -145,11 +151,18 @@ export function remoteokAdapter(): Adapter {
     slug: "remoteok",
     async collect({ client, pageBudget, fetchedAt }) {
       void pageBudget; // single-document feed
-      const { data } = await client.getJson<RemoteOkJob[]>("https://remoteok.com/api");
+      const { data } = await client.getJson<unknown>("https://remoteok.com/api");
+
+      // H8: a non-array feed body is a terminal shape error (NonTransient —
+      // no bounded-retry storm for a payload that will never parse as jobs).
+      if (!Array.isArray(data)) throw new NonTransientError(422);
 
       const observations: SourceObservation[] = [];
-      for (const entry of data.slice(1)) {
+      for (const rawEntry of data.slice(1)) {
         // Element zero is RemoteOK's legal notice — never treated as a job.
+        // Non-object entries are skipped, never crash the collection.
+        if (typeof rawEntry !== "object" || rawEntry === null) continue;
+        const entry = rawEntry as RemoteOkEntry;
         const key = typeof entry.slug === "string" ? entry.slug : String(entry.id ?? "");
         const listingUrl = typeof entry.url === "string" ? entry.url : "";
         if (!key || !listingUrl.startsWith("https://")) continue;
