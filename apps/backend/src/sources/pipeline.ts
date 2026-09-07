@@ -85,12 +85,19 @@ export async function persistObservation(
       );
       if (dup.rows.length > 0) {
         await client.query("COMMIT");
-        const existing = await client.query<{ canonical_job_id: string }>(
+        const existing = await client.query<{ canonical_job_id: string | null }>(
           "SELECT canonical_job_id FROM source_listings WHERE id = $1", [listingId]
         );
+        // M10: no non-null assertion. A missing link here means a prior
+        // attempt crashed between listing insert and canonical assignment —
+        // transient and bounded-retried, practically unreachable since both
+        // writes share one transaction.
+        if (!existing.rows[0]?.canonical_job_id) {
+          throw new Error("transient_missing_canonical_link");
+        }
         return {
           ok: true, listingId,
-          canonicalJobId: existing.rows[0].canonical_job_id!,
+          canonicalJobId: existing.rows[0].canonical_job_id,
           classification: "duplicate"
         };
       }
@@ -275,29 +282,37 @@ export async function refreshAvailability(
   );
   if (listings.rows.length === 0) return "uncertain";
 
-  const signals: Array<{ signal: "active" | "closed" | "removed"; observedAt: Date }> = [];
-  for (const listing of listings.rows) {
-    if (listing.latest_observation_at === null) continue; // imported, no own evidence
-    const latestObs = await db.query<{ availability_signal: "active" | "closed" | "removed" | null; observed_at: Date }>(
-      `SELECT availability_signal, observed_at FROM source_listing_observations
-        WHERE source_listing_id = $1 ORDER BY observed_at DESC, id DESC LIMIT 1`,
-      [listing.id]
-    );
-    if (latestObs.rows[0]?.availability_signal) {
-      signals.push({
-        signal: latestObs.rows[0].availability_signal,
-        observedAt: latestObs.rows[0].observed_at
-      });
+  // M10: one batched query for the latest observation of EVERY listing
+  // (DISTINCT ON) instead of one roundtrip per listing.
+  const latestRows = await db.query<{
+    source_listing_id: string;
+    job_source_slug: string;
+    availability_signal: "active" | "closed" | "removed" | null;
+    observed_at: Date;
+  }>(
+    `SELECT DISTINCT ON (l.id) l.id AS source_listing_id, l.job_source_slug,
+            o.availability_signal, o.observed_at
+       FROM source_listings l
+       JOIN source_listing_observations o ON o.source_listing_id = l.id
+      WHERE l.canonical_job_id = $1
+      ORDER BY l.id, o.observed_at DESC, o.id DESC`,
+    [canonicalJobId]
+  );
+  type Signal = { signal: "active" | "closed" | "removed"; observedAt: Date; slug: string };
+  const signals: Signal[] = [];
+  for (const r of latestRows.rows) {
+    if (r.availability_signal) {
+      signals.push({ signal: r.availability_signal, observedAt: r.observed_at, slug: r.job_source_slug });
     }
   }
 
   const hasOwnObservations = signals.length > 0 ||
     listings.rows.some((l) => l.latest_observation_at !== null);
-  const maxFreshness = Math.max(
-    ...listings.rows.map((l) => FRESHNESS_DAYS[l.job_source_slug] ?? 14),
-    freshnessDaysOverride ?? 14
-  );
-  const state = computeAvailabilityState(signals, hasOwnObservations, now, maxFreshness);
+  // M10: per-source freshness instead of a cross-source MAX. Each signal is
+  // judged by its own source window (a fresh RemoteOK observation keeps the
+  // job active even when the Greenhouse copy is stale, and vice versa) —
+  // neither the least- nor most-conservative global extreme.
+  const state = computeAvailabilityStateWithWindows(signals, hasOwnObservations, now, freshnessDaysOverride);
 
   const latestHistory = await db.query<{ state: AvailabilityState }>(
     `SELECT state FROM availability_history
@@ -307,11 +322,17 @@ export async function refreshAvailability(
   const priorState = latestHistory.rows[0]?.state;
 
   if (priorState !== state) {
+    // Unavailable implies a non-empty signal set (an explicit closed/removed
+    // latest observation), so the reduce below always has an element.
+    const latestSignal =
+      state === "unavailable"
+        ? signals.reduce((a, b) => (b.observedAt > a.observedAt ? b : a))
+        : undefined;
     const reason =
       state === "active"
         ? (priorState !== undefined && priorState !== "active" ? "restored" : "observation_active")
         : state === "unavailable"
-          ? signals.find((s) => s.signal !== "active")!.signal === "removed"
+          ? latestSignal?.signal === "removed"
             ? "explicit_removed"
             : "explicit_closed"
           : state === "stale"
@@ -324,4 +345,25 @@ export async function refreshAvailability(
     );
   }
   return state;
+}
+
+/** Latest-signal state computation with per-source freshness windows. */
+function computeAvailabilityStateWithWindows(
+  signals: Array<{ signal: "active" | "closed" | "removed"; observedAt: Date; slug: string }>,
+  hasOwnObservations: boolean,
+  now: Date,
+  freshnessDaysOverride?: number
+): AvailabilityState {
+  if (signals.length === 0) {
+    return "uncertain";
+  }
+  void hasOwnObservations;
+  const latest = signals.reduce((a, b) => (b.observedAt > a.observedAt ? b : a));
+  if (latest.signal === "closed" || latest.signal === "removed") {
+    return "unavailable"; // explicit authoritative signal wins regardless of age
+  }
+  const windowDays = freshnessDaysOverride ?? FRESHNESS_DAYS[latest.slug] ?? 14;
+  const ageMs = now.getTime() - latest.observedAt.getTime();
+  if (ageMs <= windowDays * DAY_MS) return "active";
+  return "stale";
 }

@@ -324,6 +324,83 @@ describe("availability processing (T4.4)", () => {
     expect(computeAvailabilityState([], false, t0, 14)).toBe("uncertain");
   });
 
+  it("M10: per-source freshness — fresh RemoteOK keeps the job active despite stale Greenhouse", async () => {
+    const DAY = 24 * 60 * 60 * 1000;
+    await createRun(RUNA, "ra");
+    const old = new Date(t0.getTime() - 20 * DAY);
+    // Greenhouse copy seen 20d ago: stale under its own 14d window.
+    const gh = await persistObservation(
+      db, observation({ externalListingKey: "m10-gh" }), RUNA, old
+    );
+    if (!gh.ok) throw Error("setup");
+    // Same job via RemoteOK, seen now: fresh under its 21d window.
+    const rok = await persistObservation(
+      db,
+      {
+        source: "remoteok",
+        externalListingKey: "m10-rok",
+        companyName: "acme",
+        title: "Backend Engineer",
+        location: "Remote",
+        descriptionText: "Build services with Go.",
+        applicationUrls: {
+          preferred: "https://remoteok.com/remote-jobs/m10-rok",
+          alternatives: []
+        },
+        postedAt: null,
+        availabilitySignal: "active",
+        restrictions: [],
+        provenance: { fetchedAt: "2026-08-23T12:00:00Z" }
+      },
+      RUNA,
+      t0
+    );
+    if (!rok.ok) throw Error("setup rok");
+    // Conservative canonicalization converged both listings on one job.
+    expect(rok.canonicalJobId).toBe(gh.canonicalJobId);
+    expect(await refreshAvailability(db, gh.canonicalJobId, t0)).toBe("active");
+  });
+
+  it("M10: an 18-day-old RemoteOK observation is active under its own 21d window", async () => {
+    const DAY = 24 * 60 * 60 * 1000;
+    await createRun(RUNA, "ra");
+    const rok = await persistObservation(
+      db,
+      {
+        source: "remoteok",
+        externalListingKey: "m10-solo",
+        companyName: "acme",
+        title: "Backend Engineer",
+        location: "Remote",
+        descriptionText: "Build services with Go.",
+        applicationUrls: {
+          preferred: "https://remoteok.com/remote-jobs/m10-solo",
+          alternatives: []
+        },
+        postedAt: null,
+        availabilitySignal: "active",
+        restrictions: [],
+        provenance: { fetchedAt: "2026-08-23T12:00:00Z" }
+      },
+      RUNA,
+      new Date(t0.getTime() - 18 * DAY)
+    );
+    if (!rok.ok) throw Error("setup");
+    expect(await refreshAvailability(db, rok.canonicalJobId, t0)).toBe("active");
+  });
+
+  it("M10: listing with no observations at all is uncertain without crashing", async () => {
+    const job = await db.query<{ id: string }>(
+      "INSERT INTO canonical_jobs DEFAULT VALUES RETURNING id"
+    );
+    await db.query(
+      `INSERT INTO source_listings (job_source_slug, external_listing_key, canonical_job_id)
+       VALUES ('greenhouse', 'm10-empty', $1)`,
+      [job.rows[0].id]
+    );
+    expect(await refreshAvailability(db, job.rows[0].id, t0)).toBe("uncertain");
+  });
+
   it("covers all four states explicitly", () => {
     const now = t0;
     const freshActive = [{ signal: "active" as const, observedAt: new Date(now.getTime() - 1000) }];

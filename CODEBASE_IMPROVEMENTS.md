@@ -810,6 +810,14 @@ Most important areas requiring attention:
   replace `!` with explicit checks.
 - **Suggested validation:** Performance test on multi-listing fixture; unit tests for
   stale-source matrix and empty-signal edge.
+- **Status: Completed 2026-09-07** — latest-observation lookup batched into one
+  `DISTINCT ON` query (no more per-listing roundtrips); freshness is now
+  per-source (each signal judged by its own window — a fresh RemoteOK copy
+  keeps the job active despite a stale Greenhouse copy, and an 18d RemoteOK-only
+  job stays active under its 21d window); both non-null assertions replaced
+  with explicit handling. Tests cover the stale-source matrix and the
+  no-observation edge. The old pure `computeAvailabilityState` helper and its
+  unit tests are untouched.
 
 ### M11. Logger allows field spoofing; minimization is convention-only; correlation unwired
 
