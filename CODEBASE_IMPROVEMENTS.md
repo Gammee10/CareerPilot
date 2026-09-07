@@ -787,6 +787,14 @@ Most important areas requiring attention:
   `ENQUEUE_POLICY` for all queues.
 - **Suggested validation:** Shutdown test (in-flight job drains); readiness probe
   test after DB drop; log inspection for correlation IDs.
+- **Status: Completed 2026-09-07** — readiness pings the DB live per probe
+  (no more boot-time sample); SIGTERM/SIGINT drains via `boss.stop()` +
+  pool close with a 25s cap (exit 0 verified on the dev stack); each job
+  handler runs in a `withCorrelation` scope; `ENQUEUE_POLICY` now covers all
+  seven queues. Verified: unit tests (policy completeness, correlation IDs in
+  logs), worker image rebuilt + booted healthy (`worker_ready`), SIGTERM exit
+  0 with healthy restart. Payload-carried producer IDs remain future work for
+  the enqueue path.
 
 ### M10. Availability refresh N+1; freshness uses MAX (least conservative)
 

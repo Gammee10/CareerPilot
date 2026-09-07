@@ -48,9 +48,16 @@ export async function startBossWithQueues(b: Boss): Promise<void> {
 /**
  * Bounded, transient-only retry policy applied at ENQUEUE time (ADR-044).
  * Handlers rethrow only clearly-transient failures; non-transient and
- * rate-limited outcomes resolve the job without retry.
+ * rate-limited outcomes resolve the job without retry. Every registered
+ * queue has an entry — future queues must add theirs here, never rely on
+ * library defaults for domain policy.
  */
-export const ENQUEUE_POLICY = {
+export const ENQUEUE_POLICY: Record<QueueName, { retryLimit: number; retryDelay: number }> = {
   extraction: { retryLimit: 2, retryDelay: 60 },
-  collection: { retryLimit: 2, retryDelay: 60 }
-} as const;
+  collection: { retryLimit: 2, retryDelay: 60 },
+  normalization: { retryLimit: 2, retryDelay: 60 },
+  canonicalization: { retryLimit: 2, retryDelay: 60 },
+  analysis: { retryLimit: 2, retryDelay: 60 },
+  evaluation: { retryLimit: 2, retryDelay: 60 },
+  availability: { retryLimit: 2, retryDelay: 60 }
+};
