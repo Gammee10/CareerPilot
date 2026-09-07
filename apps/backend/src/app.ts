@@ -19,6 +19,8 @@ import {
   requestSignInLink
 } from "./identity/signinLinks.js";
 import { revokeSession } from "./identity/sessions.js";
+import { getBoss } from "./work/boss.js";
+import { enqueueReevaluation } from "./evaluation/reevaluation.js";
 import {
   approveRoleChange,
   initiateRoleChange
@@ -74,6 +76,9 @@ export type AppDeps = {
   now?: () => Date;
   store?: ObjectStore;
   ai?: AiClient;
+  /** H16: async re-evaluation delivery. Defaults to pg-boss fire-and-forget;
+   * tests inject a capture double. Failures never fail the profile save. */
+  enqueueEvaluation?: (accountId: string) => Promise<void>;
 };
 
 const GENERIC_LINK_FAILURE = { error: "invalid_link" };
@@ -110,6 +115,16 @@ export function buildApp(deps: AppDeps): Express {
   const nowFn = deps.now ?? (() => new Date());
   const store = deps.store ?? buildObjectStore();
   const ai: AiClient = deps.ai ?? new HttpAiClient(process.env.AI_INTERNAL_URL ?? "http://ai:8000");
+  // H16: async re-evaluation delivery. The default sends to pg-boss
+  // fire-and-forget (a missing broker/secret only logs — the save itself
+  // always succeeds); tests inject a capture double.
+  const enqueueEvaluation =
+    deps.enqueueEvaluation ??
+    ((accountId: string) =>
+      enqueueReevaluation(
+        (queue, data, opts) => getBoss().send(queue, data, opts),
+        accountId
+      ).then(() => undefined));
   const app = express();
   // Behind Caddy (single reverse proxy): trust the loopback hop so IP-keyed
   // rate limits see the real client IP via X-Forwarded-For (H10). Loopback
@@ -602,6 +617,9 @@ export function buildApp(deps: AppDeps): Express {
         res.status(code).json({ error: result.reason });
         return;
       }
+      // H16: re-evaluation is asynchronous via pg-boss — never inline AI
+      // calls in the save path. Enqueue failures never fail the accept.
+      await enqueueEvaluation(req.auth!.accountId);
       res.status(200).json({
         profileVersionId: result.profileVersionId,
         versionNumber: result.versionNumber
@@ -637,6 +655,8 @@ export function buildApp(deps: AppDeps): Express {
         res.status(422).json({ error: result.reason });
         return;
       }
+      // H16: async re-evaluation via pg-boss (see accept route).
+      await enqueueEvaluation(req.auth!.accountId);
       res.status(201).json({
         profileVersionId: result.profileVersionId,
         versionNumber: result.versionNumber

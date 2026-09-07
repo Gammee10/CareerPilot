@@ -500,8 +500,7 @@ describe("T7.6 â€” search strategy controls", () => {
     });
   });
 
-  it("H6: job list is paginated with a bounded envelope", async () => {
-    const user = await signIn("paged@example.invalid");
+  it("H6: job list is paginated with a bounded envelope", async () => {    const user = await signIn("paged@example.invalid");
     for (let i = 0; i < 12; i++) {
       await seedEvaluatedJob(user.accountId);
     }
@@ -547,5 +546,39 @@ describe("T7.6 â€” search strategy controls", () => {
       expect(bad.status).toBe(200);
       expect((bad.body as { total: number }).total).toBe(12);
     });
+  });
+
+  it("H16: profile save enqueues async re-evaluation instead of evaluating inline", async () => {
+    const enqueued: string[] = [];
+    const local = makeHarness(now, {
+      enqueueEvaluation: async (accountId: string) => {
+        enqueued.push(accountId);
+      }
+    });
+    try {
+      await resetDb(local.db);
+      const adminId = await createBootstrapAdmin(local.db, "admin@example.invalid");
+      const user = await createActiveUser(local, "enqueue@example.invalid", adminId, t0);
+      await withServer(local.app, async (port) => {
+        const { requestSignInLink, confirmSignInLink } = await import(
+          "../src/identity/signinLinks.js"
+        );
+        const link = await requestSignInLink(local.db, "enqueue@example.invalid", t0);
+        if (!link.ok) throw Error("setup");
+        await confirmSignInLink(local.db, link.token, t0);
+        const redeem = await request(port, "POST", "/api/auth/signin-link/redeem", {
+          body: { token: link.token }
+        });
+        const cookie = sessionCookie(redeem);
+        const save = await request(port, "POST", `/api/account/${user.accountId}/profile/save`, {
+          cookie,
+          body: { source: "manual", content: { summary: "hello", skills: ["go"] } }
+        });
+        expect(save.status).toBe(201);
+        expect(enqueued).toEqual([user.accountId]);
+      });
+    } finally {
+      await local.close();
+    }
   });
 });

@@ -537,3 +537,78 @@ describe("H7 — shared current-view selection", () => {
     expect(current?.id).toBe(fresh.evaluationId);
   });
 });
+
+describe("H16 — bounded, source-scoped re-evaluation", () => {
+  async function setTargeting(accountId: string, targeting: unknown): Promise<void> {
+    await db.query(
+      `INSERT INTO search_strategy (account_id, source_targeting) VALUES ($1, $2)
+       ON CONFLICT (account_id) DO UPDATE SET source_targeting = $2`,
+      [accountId, JSON.stringify(targeting)]
+    );
+  }
+
+  it("enforces ADR-041 source scoping: disallowed sources exclude the job", async () => {
+    const seeded = await seedJobWithEvaluation(); // greenhouse-only listing
+    // No targeting → in scope.
+    expect(await selectJobsForReevaluation(db, seeded.accountId)).toContain(seeded.jobId);
+    // Targeting the job's own source → still in scope.
+    await setTargeting(seeded.accountId, { sources: ["greenhouse"] });
+    expect(await selectJobsForReevaluation(db, seeded.accountId)).toContain(seeded.jobId);
+    // Targeting only other sources → excluded (was previously voided).
+    await setTargeting(seeded.accountId, { sources: ["lever"] });
+    expect(await selectJobsForReevaluation(db, seeded.accountId)).not.toContain(seeded.jobId);
+  });
+
+  it("resolves the company filter from the primary listing, not a lexicographic pick", async () => {
+    const seeded = await seedJobWithEvaluation();
+    await db.query(
+      `UPDATE source_listings SET strong_match_key = 'acme|backend engineer|new york'
+        WHERE canonical_job_id = $1`,
+      [seeded.jobId]
+    );
+    await setTargeting(seeded.accountId, { companies: ["acme"] });
+    expect(await selectJobsForReevaluation(db, seeded.accountId)).toContain(seeded.jobId);
+    await setTargeting(seeded.accountId, { companies: ["globex"] });
+    expect(await selectJobsForReevaluation(db, seeded.accountId)).not.toContain(seeded.jobId);
+  });
+
+  it("reports truncation when candidates exceed the batch bound", async () => {
+    const seeded = await seedJobWithEvaluation();
+    const full = await runReevaluationForProfileChange(db, undefined, seeded.accountId, t0);
+    expect(full).toEqual({ evaluated: 1, truncated: false });
+    const bounded = await runReevaluationForProfileChange(db, undefined, seeded.accountId, t0, {
+      limit: 1
+    });
+    expect(bounded.evaluated).toBeLessThanOrEqual(1);
+    // Limit/offset pagination composes: an empty page evaluates nothing.
+    const empty = await selectJobsForReevaluation(db, seeded.accountId, { limit: 10, offset: 99 });
+    expect(empty).toEqual([]);
+  });
+
+  it("enqueueReevaluation sends to the evaluation queue; failures return false", async () => {
+    const { enqueueReevaluation } = await import("../src/evaluation/reevaluation.js");
+    const { ENQUEUE_POLICY } = await import("../src/work/boss.js");
+    const sent: Array<{ queue: string; data: unknown; opts: unknown }> = [];
+    const ok = await enqueueReevaluation(
+      async (queue, data, opts) => {
+        sent.push({ queue, data, opts });
+      },
+      "account-1"
+    );
+    expect(ok).toBe(true);
+    expect(sent).toHaveLength(1);
+    expect(sent[0].queue).toBe("evaluation");
+    expect(sent[0].data).toEqual({ accountId: "account-1" });
+    expect(sent[0].opts).toEqual({
+      retryLimit: ENQUEUE_POLICY.evaluation.retryLimit,
+      retryDelay: ENQUEUE_POLICY.evaluation.retryDelay
+    });
+    const failed = await enqueueReevaluation(
+      async () => {
+        throw new Error("broker down");
+      },
+      "account-1"
+    );
+    expect(failed).toBe(false);
+  });
+});

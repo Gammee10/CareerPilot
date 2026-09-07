@@ -32,6 +32,7 @@ export type Harness = {
 export type HarnessOptions = {
   store?: ObjectStore;
   ai?: AiClient;
+  enqueueEvaluation?: (accountId: string) => Promise<void>;
 };
 
 export function makeHarness(

@@ -640,6 +640,16 @@ Most important areas requiring attention:
   source filter into the candidate query.
 - **Suggested validation:** Test with 200-job fixture: bounded AI calls, paginated
   completion, disallowed sources excluded.
+- **Status: Completed 2026-09-07** — selector takes limit/offset (default batch
+  50) with truncation reporting; previously-voided `allowedSources` now
+  enforced in SQL (job qualifies only via an allowed-source listing);
+  company resolution uses the primary listing (latest-observation holder,
+  H7-consistent) instead of the lexicographic MIN key; delivery is async via
+  a new `evaluation` pg-boss queue (overflow pages re-enqueue; worker handler
+  registered) with saves only ever *enqueueing* (fire-and-forget, save never
+  fails on broker errors). Tests: source include/exclude, company
+  include/exclude, truncation/pagination, enqueue contract + failure, and
+  save-route enqueue capture.
 
 ---
 

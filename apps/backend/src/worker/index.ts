@@ -5,8 +5,13 @@
 import http from "node:http";
 import type { Job } from "pg-boss";
 import type Boss from "pg-boss";
-import { getBoss, startBossWithQueues } from "../work/boss.js";
+import { getBoss, startBossWithQueues, ENQUEUE_POLICY } from "../work/boss.js";
 import { runCollectionJob, type CollectionPayload } from "../discovery/collection.js";
+import {
+  runReevaluationForProfileChange,
+  REEVALUATION_BATCH_LIMIT,
+  type ReevaluationJobData
+} from "../evaluation/reevaluation.js";
 import { runExtraction } from "../profile/extraction.js";
 import { buildObjectStore } from "../storage/objectStore.js";
 import { HttpAiClient } from "../profile/aiClient.js";
@@ -76,6 +81,36 @@ async function main(): Promise<void> {
             throw new Error("transient_ai_unavailable"); // bounded retry
           }
           results.push(result);
+        }
+        return results;
+      });
+    }
+  );
+
+  // H16: bounded re-evaluation batches (T6.5). Overflow pages re-enqueue
+  // themselves — one profile change can never become an unbounded AI fan-out.
+  const activeBoss = boss;
+  await boss.work<ReevaluationJobData>(
+    "evaluation",
+    async (jobs: Job<ReevaluationJobData>[]) => {
+      return withCorrelation(async () => {
+        const results = [];
+        for (const job of jobs) {
+          const offset = job.data.offset ?? 0;
+          const outcome = await runReevaluationForProfileChange(
+            pool, ai, job.data.accountId, new Date(), { offset }
+          );
+          if (outcome.truncated) {
+            await activeBoss.send(
+              "evaluation",
+              { accountId: job.data.accountId, offset: offset + REEVALUATION_BATCH_LIMIT },
+              {
+                retryLimit: ENQUEUE_POLICY.evaluation.retryLimit,
+                retryDelay: ENQUEUE_POLICY.evaluation.retryDelay
+              }
+            );
+          }
+          results.push(outcome);
         }
         return results;
       });
