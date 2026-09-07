@@ -142,6 +142,7 @@ export function buildApp(deps: AppDeps): Express {
   });
 
   // Redemption step: consumes the link exactly once and starts a session.
+  // Role derives server-side from accounts.is_admin (never request input).
   app.post("/api/auth/signin-link/redeem", async (req: Request, res: Response) => {
     const token = typeof req.body?.token === "string" ? req.body.token : "";
     const result = token ? await redeemSignInLink(db, token, nowFn()) : { ok: false as const };
@@ -149,7 +150,12 @@ export function buildApp(deps: AppDeps): Express {
       res.status(400).json(GENERIC_LINK_FAILURE);
       return;
     }
-    const session = await createSession(db, result.accountId, "user", nowFn());
+    const adminRow = await db.query<{ is_admin: boolean }>(
+      "SELECT is_admin FROM accounts WHERE id = $1",
+      [result.accountId]
+    );
+    const role = adminRow.rows[0]?.is_admin === true ? "admin" : "user";
+    const session = await createSession(db, result.accountId, role, nowFn());
     setSessionCookie(res, session.token);
     res.status(200).json({ status: "authenticated" });
   });
@@ -162,7 +168,12 @@ export function buildApp(deps: AppDeps): Express {
       res.status(400).json(GENERIC_LINK_FAILURE);
       return;
     }
-    const session = await createSession(db, result.accountId, "user", nowFn());
+    const adminRow = await db.query<{ is_admin: boolean }>(
+      "SELECT is_admin FROM accounts WHERE id = $1",
+      [result.accountId]
+    );
+    const role = adminRow.rows[0]?.is_admin === true ? "admin" : "user";
+    const session = await createSession(db, result.accountId, role, nowFn());
     setSessionCookie(res, session.token);
     res.status(200).json({ status: "activated" });
   });
