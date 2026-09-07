@@ -13,6 +13,14 @@
 # Optional:
 #   BACKUP_DIR      (default ./backups)         local artifact directory
 #   UPLOAD_CMD      e.g.: xargs -I{} oci os object put --bucket-name careerpilot-backup --file {}
+#                 Operator-supplied shell; the artifact path arrives on stdin.
+#   DOWNLOAD_CMD    e.g.: xargs -I{} oci os object get --bucket-name careerpilot-backup
+#                         --name {} --file -
+#                 Required when UPLOAD_CMD is set. Receives the artifact
+#                 basename on stdin; the object bytes must arrive on stdout
+#                 for the post-upload round-trip verification. Absence fails
+#                 the backup closed (an unverified upload is worse than a
+#                 loud failure).
 #   RETENTION_DAYS  (default 90)
 #
 # Telemetry outcome is emitted as ONE minimized JSON line (no data content).
@@ -51,7 +59,7 @@ pg_dump -Fc -h "${PGHOST:-localhost}" -p "${PGPORT:-5432}" \
   -U "${PGUSER:-careerpilot}" -d "${PGDATABASE:-careerpilot}" \
   -f "$WORK/dump.bin" || fail "pg_dump"
 
-openssl enc -aes-256-cbc -pbkdf2 -salt \
+openssl enc -aes-256-cbc -pbkdf2 -iter 600000 -salt \
   -in "$WORK/dump.bin" -out "$WORK/dump.bin.enc" \
   -pass file:"$KEY_FILE" || fail "encrypt"
 
@@ -61,13 +69,35 @@ ENC_SHA="$(sha256sum "$WORK/dump.bin.enc" | cut -d' ' -f1)"
 ARTIFACT="$BACKUP_DIR/careerpilot-$TS.dump.enc"
 mv "$WORK/dump.bin.enc" "$ARTIFACT" || fail "persist"
 
-# Optional push to the dedicated private bucket.
+# Detached integrity manifest (H12): the drill verifies this BEFORE
+# decrypting, so tampered/malleable-CBC artifacts fail fast instead of
+# surfacing as inscrutable pg_restore errors.
+printf '%s  %s  pbkdf2-iter-600000\n' "$ENC_SHA" "$(basename "$ARTIFACT")" \
+  > "$ARTIFACT.sha256" || fail "manifest"
+
+# Optional push to the dedicated private bucket. Quoted expansion executed
+# as operator-supplied shell (H12: no word-splitting/glob surprises).
 if [ -n "${UPLOAD_CMD:-}" ]; then
-  echo "$ARTIFACT" | $UPLOAD_CMD || fail "upload"
+  printf '%s\n' "$ARTIFACT" | bash -c "$UPLOAD_CMD" || fail "upload"
+  # Post-upload verification (H12): re-download the bucket object and compare
+  # digests. Partial uploads and wrong-bucket pushes fail closed here.
+  if [ -z "${DOWNLOAD_CMD:-}" ]; then
+    rm -f "$ARTIFACT" "$ARTIFACT.sha256"
+    telemetry "backup_failed" ",\"stage\":\"upload_unverified\""
+    exit 1
+  fi
+  printf '%s\n' "$(basename "$ARTIFACT")" | bash -c "$DOWNLOAD_CMD" \
+    > "$WORK/roundtrip.enc" || fail "verify_download"
+  ROUNDTRIP_SHA="$(sha256sum "$WORK/roundtrip.enc" | cut -d' ' -f1)"
+  if [ "$ROUNDTRIP_SHA" != "$ENC_SHA" ]; then
+    rm -f "$ARTIFACT" "$ARTIFACT.sha256"
+    telemetry "backup_failed" ",\"stage\":\"upload_mismatch\""
+    exit 1
+  fi
 fi
 
 # Post-upload integrity check: decrypt and compare digests.
-openssl enc -d -aes-256-cbc -pbkdf2 \
+openssl enc -d -aes-256-cbc -pbkdf2 -iter 600000 \
   -in "$ARTIFACT" -out "$WORK/verify.bin" \
   -pass file:"$KEY_FILE" || fail "integrity_decrypt"
 VERIFY_SHA="$(sha256sum "$WORK/verify.bin" | cut -d' ' -f1)"

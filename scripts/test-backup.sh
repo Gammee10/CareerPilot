@@ -56,6 +56,13 @@ ARTIFACT="$(ls -t "$ROOT"/backups-test/careerpilot-*.dump.enc | head -1)"
 [ -f "$ARTIFACT" ] || { echo "FAILED: no artifact"; exit 1; }
 BACKUP_TS="$(date -u +%FT%TZ)"   # moment the snapshot was taken
 
+echo "== Detached manifest check (H12) =="
+[ -f "$ARTIFACT.sha256" ] || { echo "FAILED: no manifest sidecar"; exit 1; }
+MANIFEST_SHA="$(cut -d' ' -f1 < "$ARTIFACT.sha256")"
+ARTIFACT_SHA="$(sha256sum "$ARTIFACT" | cut -d' ' -f1)"
+[ "$MANIFEST_SHA" = "$ARTIFACT_SHA" ] || { echo "FAILED: manifest mismatch"; exit 1; }
+echo "manifest matches artifact ($ARTIFACT_SHA)"
+
 # Closure that happens AFTER the backup (must be replayed on restore).
 echo "UPDATE accounts SET state='closed', closed_at=now() WHERE email='pre-backup@example.invalid';" |
   docker exec -i "$PGC" psql -U postgres -d backupdb -q
@@ -63,6 +70,49 @@ echo "INSERT INTO audit_events (actor_type, action, outcome, target_category, ta
       SELECT 'system', 'account.closed', 'success', 'account', id::text, '{}'
         FROM accounts WHERE email='pre-backup@example.invalid';" |
   docker exec -i "$PGC" psql -U postgres -d backupdb -q
+
+echo "== Upload round-trip verification (H12) =="
+FAKE_BUCKET="$ROOT/backups-test/fake-bucket"
+mkdir -p "$FAKE_BUCKET"
+# Happy path: fake bucket stores the object; re-download hash must match.
+docker exec \
+  -e PGHOST=localhost -e PGPORT=5432 -e PGUSER=postgres -e PGDATABASE=backupdb \
+  -e BACKUP_ENCRYPTION_KEY_FILE=/tmp/backup.key \
+  -e BACKUP_DIR=/repo/backups-test \
+  -e "UPLOAD_CMD=xargs -I{} cp {} /repo/backups-test/fake-bucket/" \
+  -e "DOWNLOAD_CMD=xargs -I{} cat /repo/backups-test/fake-bucket/{}" \
+  "$PGC" bash /repo/ops/backup.sh || { echo "FAILED: bucketed backup"; exit 1; }
+NEWEST="$(ls -t "$ROOT"/backups-test/careerpilot-*.dump.enc | head -1)"
+BUCKET_COPY="$FAKE_BUCKET/$(basename "$NEWEST")"
+[ -f "$BUCKET_COPY" ] || { echo "FAILED: object never reached the bucket"; exit 1; }
+[ "$(sha256sum "$BUCKET_COPY" | cut -d' ' -f1)" = "$(sha256sum "$NEWEST" | cut -d' ' -f1)" ] \
+  || { echo "FAILED: bucket copy differs"; exit 1; }
+echo "bucket round-trip hash matches"
+
+# Negative 1: corrupted re-download must fail the backup closed.
+if docker exec \
+  -e PGHOST=localhost -e PGPORT=5432 -e PGUSER=postgres -e PGDATABASE=backupdb \
+  -e BACKUP_ENCRYPTION_KEY_FILE=/tmp/backup.key \
+  -e BACKUP_DIR=/repo/backups-test \
+  -e "UPLOAD_CMD=xargs -I{} cp {} /repo/backups-test/fake-bucket/" \
+  -e "DOWNLOAD_CMD=xargs -I{} echo corrupt-bytes" \
+  "$PGC" bash /repo/ops/backup.sh 2>/dev/null; then
+  echo "FAILED: mismatched re-download was not detected"
+  exit 1
+fi
+echo "mismatched re-download correctly failed the backup"
+
+# Negative 2: upload without any download verifier must fail closed.
+if docker exec \
+  -e PGHOST=localhost -e PGPORT=5432 -e PGUSER=postgres -e PGDATABASE=backupdb \
+  -e BACKUP_ENCRYPTION_KEY_FILE=/tmp/backup.key \
+  -e BACKUP_DIR=/repo/backups-test \
+  -e "UPLOAD_CMD=xargs -I{} cp {} /repo/backups-test/fake-bucket/" \
+  "$PGC" bash /repo/ops/backup.sh 2>/dev/null; then
+  echo "FAILED: unverified upload was not detected"
+  exit 1
+fi
+echo "unverified upload correctly failed the backup"
 
 echo "== Restore drill with deletion-replay =="
 # Export post-backup closure audits from the LIVE database (immutable log).
@@ -89,6 +139,7 @@ echo "$DRILL_OUT" | grep -q "closed_accounts_after_replay=1" \
 
 echo "== Integrity-failure path (tampered artifact) =="
 cp "$ARTIFACT" "$ROOT/backups-test/tampered.dump.enc"
+cp "$ARTIFACT.sha256" "$ROOT/backups-test/tampered.dump.enc.sha256"
 printf 'X' | dd of="$ROOT/backups-test/tampered.dump.enc" bs=1 seek=5 conv=notrunc 2>/dev/null
 if BACKUP_ENCRYPTION_KEY_FILE=/tmp/missing.key \
    DRILL_CONTAINER="careerpiot-tamper-drill" \

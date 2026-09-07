@@ -561,6 +561,14 @@ Most important areas requiring attention:
   manifest alongside the artifact, and assert equality in `test-backup.sh`.
 - **Suggested validation:** Extend `test-backup.sh`: correct-key + tampered-bytes
   case must fail; upload round-trip hash must match.
+- **Status: Completed 2026-09-07** — kept AES-256-CBC (no GCM in `openssl enc`
+  or Alpine images) but hardened to `-pbkdf2 -iter 600000` + detached `.sha256`
+  manifest verified before every decrypt; `UPLOAD_CMD` quoted as
+  operator-shell; new `DOWNLOAD_CMD` round-trip verification (missing verifier
+  or hash mismatch fails the backup closed); drill rejects tampered artifacts
+  via manifest before decrypting. `test-backup.sh` covers manifest match,
+  bucket round-trip, both negative upload paths, drill pass with
+  deletion-replay proof, and tamper rejection — full script green end to end.
 
 ### H13. Secrets handling gaps: OneDrive sync, test-key gitignore, key in process list
 

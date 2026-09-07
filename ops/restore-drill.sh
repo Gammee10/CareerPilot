@@ -20,6 +20,19 @@ KEY_FILE="${BACKUP_ENCRYPTION_KEY_FILE:?set BACKUP_ENCRYPTION_KEY_FILE}"
 CONTAINER="${DRILL_CONTAINER:-careerpilot-drill-pg}"
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 
+# H12: verify the detached manifest BEFORE decrypting so tampered artifacts
+# fail fast with a clear cause (CBC malleability would otherwise surface as
+# inscrutable pg_restore errors — or worse, silent corruption). This runs on
+# the original (Unix-style) path, before any cygpath conversion below.
+if [ -f "$ARTIFACT.sha256" ]; then
+  EXPECTED_SHA="$(cut -d' ' -f1 < "$ARTIFACT.sha256")"
+  ACTUAL_SHA="$(sha256sum "$ARTIFACT" | cut -d' ' -f1)"
+  if [ "$EXPECTED_SHA" != "$ACTUAL_SHA" ]; then
+    echo "DRILL FAILED: manifest_mismatch"
+    exit 1
+  fi
+fi
+
 # Native crypto binaries need Windows paths under Git Bash.
 if command -v cygpath >/dev/null 2>&1; then
   ARTIFACT="$(cygpath -w "$ARTIFACT")"
@@ -50,7 +63,7 @@ if command -v cygpath >/dev/null 2>&1; then
 else
   WORK_NATIVE="$WORK"
 fi
-openssl enc -d -aes-256-cbc -pbkdf2 -in "$ARTIFACT" -out "$WORK_NATIVE/restore.bin" \
+openssl enc -d -aes-256-cbc -pbkdf2 -iter 600000 -in "$ARTIFACT" -out "$WORK_NATIVE/restore.bin" \
   -pass file:"$KEY_FILE" || { echo "DRILL FAILED: decrypt"; exit 1; }
 
 docker cp "$WORK_NATIVE/restore.bin" "$CONTAINER:/tmp/restore.bin" || { echo "DRILL FAILED: copy"; exit 1; }
