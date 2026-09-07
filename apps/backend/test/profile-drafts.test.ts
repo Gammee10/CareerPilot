@@ -222,4 +222,30 @@ describe("profile versions (T3.4 / ADR-005)", () => {
     );
     expect(validStrict.ok).toBe(true);
   });
+
+  it("M5: non-string skills and oversized content are rejected at save (never 500 at score)", async () => {
+    const adminId = await createBootstrapAdmin(h.db, "admin6@example.invalid");
+    const user = await createActiveUser(h, "m5@example.invalid", adminId, t0);
+    // Non-string skill items → invalid_content, not a downstream 500.
+    expect(
+      await saveProfileVersion(h.db, user.accountId, { skills: ["go", 42] }, "manual", t0)
+    ).toEqual({ ok: false, reason: "invalid_content" });
+    expect(
+      await saveProfileVersion(h.db, user.accountId, { skills: ["ok"], target_role: 7 }, "manual", t0)
+    ).toEqual({ ok: false, reason: "invalid_content" });
+    expect(
+      await saveProfileVersion(
+        h.db, user.accountId,
+        { priorities: { role_fit: "maximum" } }, "manual", t0
+      )
+    ).toEqual({ ok: false, reason: "invalid_content" });
+    expect(
+      await saveProfileVersion(h.db, user.accountId, { summary: "x".repeat(60_000) }, "manual", t0)
+    ).toEqual({ ok: false, reason: "invalid_content" });
+    // Nothing persisted by rejected saves.
+    const rows = await h.db.query("SELECT id FROM profile_versions WHERE account_id = $1", [
+      user.accountId
+    ]);
+    expect(rows.rows).toHaveLength(0);
+  });
 });

@@ -407,8 +407,7 @@ describe("engine integration", () => {
     expect(aiCalls).toBe(0);
   });
 
-  it("hourly per-account evaluation budget is enforced before any AI call (H1)", async () => {
-    const seeded = await seedJobWithEvaluation();
+  it("hourly per-account evaluation budget is enforced before any AI call (H1)", async () => {    const seeded = await seedJobWithEvaluation();
     const { EVALUATION_HOURLY_LIMIT } = await import("../src/evaluation/engine.js");
     // Seed spends up to the budget (one snapshot already exists from seeding).
     const { createEvaluationSnapshot } = await import("../src/evaluation/snapshot.js");
@@ -443,6 +442,22 @@ describe("engine integration", () => {
     const result = await evaluateJobForUser(db, seeded.accountId, seeded.jobId, t0, ai);
     expect(result).toEqual({ ok: false, reason: "rate_limited" });
     expect(aiCalls).toBe(0);
+  });
+
+  it("M5: legacy non-string skills never crash scoring (coerced, not 500)", async () => {
+    const seeded = await seedJobWithEvaluation();
+    // Bypass validation to simulate a pre-hardening row.
+    const bad = await db.query<{ id: string }>(
+      `INSERT INTO profile_versions (account_id, version_number, source, content)
+       VALUES ($1, 2, 'manual', '{"skills":["go", 42, null]}') RETURNING id`,
+      [seeded.accountId]
+    );
+    await db.query(
+      "UPDATE career_profiles SET current_profile_version_id = $2 WHERE account_id = $1",
+      [seeded.accountId, bad.rows[0].id]
+    );
+    const result = await evaluateJobForUser(db, seeded.accountId, seeded.jobId, t0);
+    expect(result.ok).toBe(true);
   });
 });
 

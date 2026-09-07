@@ -28,11 +28,68 @@ export function validateProfileContent(raw: unknown):
   }
   const content = raw as ProfileContent;
 
+  // M5: overall size/depth bounds against DB bloat / DoS via huge payloads.
+  // 50 KB serialized and depth 5 comfortably exceed legitimate profiles.
+  const serialized = (() => {
+    try {
+      return JSON.stringify(raw);
+    } catch {
+      return null;
+    }
+  })();
+  if (serialized === null || serialized.length > 50 * 1024) {
+    return { ok: false, reason: "content_too_large" };
+  }
+  if (jsonDepth(raw) > 5) return { ok: false, reason: "content_too_deep" };
+  if (Object.keys(content).length > 100) return { ok: false, reason: "too_many_fields" };
+
   // Free-text sections are allowed; settings carry classification rules.
   const reserved = new Set(["settings", "skills", "summary"]);
   for (const key of Object.keys(content)) {
     if (!reserved.has(key) && typeof content[key] === "function") {
       return { ok: false, reason: `invalid_field:${key}` };
+    }
+  }
+
+  // M5: scalar sections are schema-checked so downstream scoring can never
+  // see a non-string skill (which crashed with a 500 in scoring).
+  if (content.summary !== undefined &&
+      (typeof content.summary !== "string" || content.summary.length > 2000)) {
+    return { ok: false, reason: "invalid_summary" };
+  }
+  const targetRole = (content as Record<string, unknown>)["target_role"];
+  if (targetRole !== undefined &&
+      (typeof targetRole !== "string" || targetRole.length > 200)) {
+    return { ok: false, reason: "invalid_target_role" };
+  }
+  if (content.skills !== undefined) {
+    if (
+      !Array.isArray(content.skills) || content.skills.length > 100 ||
+      content.skills.some((s) => typeof s !== "string" || s.length > 200)
+    ) {
+      return { ok: false, reason: "invalid_skills" };
+    }
+  }
+  const priorities = (content as Record<string, unknown>)["priorities"];
+  if (priorities !== undefined) {
+    if (typeof priorities !== "object" || priorities === null || Array.isArray(priorities)) {
+      return { ok: false, reason: "invalid_priorities" };
+    }
+    const entries = Object.entries(priorities);
+    if (
+      entries.length > 20 ||
+      entries.some(([, v]) => v !== "higher" && v !== "normal" && v !== "lower")
+    ) {
+      return { ok: false, reason: "invalid_priorities" };
+    }
+  }
+  const certifications = (content as Record<string, unknown>)["certifications"];
+  if (certifications !== undefined) {
+    if (
+      !Array.isArray(certifications) || certifications.length > 30 ||
+      certifications.some((c) => typeof c !== "string" || c.length > 200)
+    ) {
+      return { ok: false, reason: "invalid_certifications" };
     }
   }
 
@@ -42,7 +99,9 @@ export function validateProfileContent(raw: unknown):
       Array.isArray(content.settings)) {
     return { ok: false, reason: "invalid_settings" };
   }
-  for (const [name, setting] of Object.entries(content.settings)) {
+  const settingEntries = Object.entries(content.settings);
+  if (settingEntries.length > 50) return { ok: false, reason: "too_many_settings" };
+  for (const [name, setting] of settingEntries) {
     if (
       typeof setting !== "object" ||
       setting === null ||
@@ -62,10 +121,15 @@ export function validateProfileContent(raw: unknown):
     void HARD_CONSTRAINT_KEYS; // classification is user-declared per setting
   }
 
-  if (content.skills !== undefined && !Array.isArray(content.skills)) {
-    return { ok: false, reason: "invalid_skills" };
-  }
   return { ok: true, content };
+}
+
+function jsonDepth(v: unknown, seen = new Set<unknown>()): number {
+  if (typeof v !== "object" || v === null || seen.has(v)) return 0;
+  seen.add(v);
+  const children = Object.values(v);
+  if (children.length === 0) return 1;
+  return 1 + Math.max(...children.map((c) => jsonDepth(c, seen)));
 }
 
 export type SaveResult =

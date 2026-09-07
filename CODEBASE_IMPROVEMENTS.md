@@ -696,6 +696,12 @@ Most important areas requiring attention:
 - **Recommended improvement:** Schema-check `target_role`, `skills` (string items,
   capped count/length), `priorities`, plus overall size caps and depth limits.
 - **Suggested validation:** Unit tests: non-string skill → 400 at save, never 500 at score.
+- **Status: Completed 2026-09-07** — `validateProfileContent` now schema-checks
+  `summary`/`target_role` strings, `skills` (string items, ≤100, ≤200 chars),
+  `priorities` (higher/normal/lower only), `certifications`, settings count
+  cap, plus 50 KB size and depth-5 bounds; the engine additionally coerces
+  legacy non-string skills so old rows score instead of 500. Tests cover
+  save-time rejection (nothing persisted) and legacy-row scoring.
 
 ### M6. UUIDs never validated at the edge (malformed → 500 noise)
 

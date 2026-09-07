@@ -100,6 +100,10 @@ export async function evaluateJobForUser(
   }
 
   // ---- Stage 3: scoring with transparent penalties ----
+  const rawSkills = Array.isArray(profile.skills) ? (profile.skills as unknown[]) : [];
+  // M5 defense in depth: validation rejects non-string skills at save time,
+  // but legacy rows predate the check — coerce here so scoring never 500s.
+  const profileSkills = rawSkills.filter((s): s is string => typeof s === "string");
   const scoring = scoreJob({
     constraintStatus: constraints.status,
     unknownConstraints: constraints.unknowns,
@@ -108,7 +112,7 @@ export async function evaluateJobForUser(
       typeof (profile as Record<string, unknown>)["target_role"] === "string"
         ? ((profile as Record<string, unknown>)["target_role"] as string)
         : null,
-    profileSkills: Array.isArray(profile.skills) ? (profile.skills as string[]) : [],
+    profileSkills,
     descriptionText: null, // structured description storage arrives with Phase-4 depth work
     remoteInferred: view.facts.remoteInferred,
     remoteOnlyPreferred: settings["remote_only"]?.classification === "hard_constraint",
