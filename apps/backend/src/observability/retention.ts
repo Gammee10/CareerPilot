@@ -2,11 +2,13 @@
 // Every delete runs inside a transaction marked `app.retention_sweep = 'on'`
 // so the append-only triggers permit it (see migration 0001).
 import type { Pool } from "pg";
+import type { ObjectStore } from "../storage/objectStore.js";
 
 const DAY_MS = 24 * 60 * 60 * 1000;
 
 export type RetentionResults = {
   resumeGraceMarked: number;
+  resumeArtifactsDeleted: number;
   sharedObservationsDeleted: number;
   availabilityDeleted: number;
   auditDeleted: number;
@@ -33,17 +35,42 @@ async function sweepStatement(
   }
 }
 
-export async function runRetentionSweep(db: Pool, now: Date): Promise<RetentionResults> {
+export async function runRetentionSweep(
+  db: Pool,
+  now: Date,
+  store?: ObjectStore
+): Promise<RetentionResults> {
   // Resume grace (ADR-020): replaced/removed raw resumes are soft-marked for
-  // deletion after their 30-day grace. Objects themselves are purged by the
-  // artifact sweeper using deleted_at.
-  const resumeGraceMarked = await sweepStatement(
+  // deletion after their 30-day grace. Object bytes for newly swept rows are
+  // deleted from the artifact store right after the marking commits (C7) —
+  // storage keys only, never content, in any log line.
+  const sweptKeys = await sweepReturning(
     db,
     `UPDATE resume_documents SET deleted_at = $2
       WHERE deleted_at IS NULL AND superseded_at IS NOT NULL
-        AND superseded_at <= $1`,
+        AND superseded_at <= $1
+      RETURNING storage_key`,
     [new Date(now.getTime() - 30 * DAY_MS), now]
   );
+  const resumeGraceMarked = sweptKeys.length;
+  let resumeArtifactsDeleted = 0;
+  if (store) {
+    let failures = 0;
+    for (const key of sweptKeys) {
+      try {
+        await store.delete(key);
+        resumeArtifactsDeleted += 1;
+      } catch {
+        failures += 1;
+      }
+    }
+    // Minimized telemetry: counts only (ADR-015).
+    console.log(JSON.stringify({
+      event: "retention_resume_artifacts",
+      deleted: resumeArtifactsDeleted,
+      failed: failures
+    }));
+  }
 
   // Shared job data (ADR-021): observations + availability older than 180 days.
   const sharedCutoff = new Date(now.getTime() - 180 * DAY_MS);
@@ -74,9 +101,30 @@ export async function runRetentionSweep(db: Pool, now: Date): Promise<RetentionR
 
   return {
     resumeGraceMarked,
+    resumeArtifactsDeleted,
     sharedObservationsDeleted,
     availabilityDeleted,
     auditDeleted,
     exceptionalAccessDeleted
   };
+}
+
+async function sweepReturning(
+  db: Pool,
+  sql: string,
+  params: unknown[]
+): Promise<string[]> {
+  const client = await db.connect();
+  try {
+    await client.query("BEGIN");
+    await client.query("SET LOCAL app.retention_sweep = 'on'");
+    const res = await client.query<{ storage_key: string }>(sql, params);
+    await client.query("COMMIT");
+    return res.rows.map((r) => r.storage_key);
+  } catch (err) {
+    await client.query("ROLLBACK").catch(() => undefined);
+    throw err;
+  } finally {
+    client.release();
+  }
 }

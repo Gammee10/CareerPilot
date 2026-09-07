@@ -221,6 +221,12 @@ Most important areas requiring attention:
      with a one-off sweep query reviewed against the retention schedule.
 - **Suggested validation:** Retention tests: accepted resume older than 30d →
   row soft-deleted + object deleted; fresh rows untouched.
+- **Status: Completed 2026-09-07** — `completeUpload` marks all prior account
+  raws `superseded_at` in the same tx (replacement starts the grace; fresh doc
+  stays current, so no backfill needed); `runRetentionSweep(db, now, store?)`
+  deletes object bytes for newly swept rows (`RETURNING storage_key`,
+  counts-only telemetry, `resumeArtifactsDeleted` in results); writer + sweeper
+  tests added.
 
 ### C8. Shared-observation delete can orphan evaluations / break latest-hash chains
 

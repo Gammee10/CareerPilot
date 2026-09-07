@@ -1,6 +1,7 @@
 // T8.5 — retention enforcement across category schedules (ADRs 019–021).
 import { describe, it, expect, beforeEach, afterAll } from "vitest";
 import { runRetentionSweep } from "../src/observability/retention.js";
+import { InMemoryObjectStore } from "../src/storage/objectStore.js";
 import { resetDb } from "./helpers.js";
 import { testDbConfig, TEST_DB } from "./global-setup.js";
 import { Pool } from "pg";
@@ -88,8 +89,8 @@ describe("retention sweeps", () => {
     await db.query(
       `INSERT INTO exceptional_access_requests
          (requested_by_account_id, purpose, scope, status, time_limit, requested_at)
-       VALUES ($1, 'support', '{}', 'completed', now(), $2),
-              ($1, 'recent', '{}', 'approved', now(), now())`,
+        VALUES ($1, 'support', '{}', 'completed', now(), $2),
+               ($1, 'recent', '{}', 'approved', now(), now())`,
       [acct.rows[0].id, new Date(t0.getTime() - 800 * DAY)]
     );
     await runRetentionSweep(db, t0);
@@ -98,5 +99,55 @@ describe("retention sweeps", () => {
     );
     expect(purposes.rows).toHaveLength(1);
     expect(purposes.rows[0].purpose).toBe("recent");
+  });
+
+  it("replacement upload supersedes prior raws, starting their grace (C7 writer)", async () => {
+    const acct = await db.query<{ id: string }>(
+      `INSERT INTO accounts (email, state) VALUES ('c7@example.invalid', 'active') RETURNING id`
+    );
+    const store = new InMemoryObjectStore();
+    const { createUploadGrant, completeUpload } = await import(
+      "../src/profile/resumes.js"
+    );
+    const upload = async (text: string) => {
+      const grant = await createUploadGrant(db, acct.rows[0].id, t0);
+      const res = await completeUpload(
+        db, store, grant.token, Buffer.from(text), "text/plain", t0
+      );
+      if (!res.ok) throw Error("setup upload");
+      return res.resumeDocumentId;
+    };
+    const first = await upload("first resume");
+    const second = await upload("second resume");
+    const rows = await db.query<{ id: string; superseded_at: Date | null }>(
+      "SELECT id, superseded_at FROM resume_documents WHERE account_id = $1",
+      [acct.rows[0].id]
+    );
+    expect(rows.rows.find((r) => r.id === first)!.superseded_at).not.toBeNull();
+    expect(rows.rows.find((r) => r.id === second)!.superseded_at).toBeNull();
+  });
+
+  it("sweep deletes artifact bytes for swept rows and keeps fresh bytes (C7 sweeper)", async () => {
+    const acct = await db.query<{ id: string }>(
+      `INSERT INTO accounts (email, state) VALUES ('c7b@example.invalid', 'active') RETURNING id`
+    );
+    const store = new InMemoryObjectStore();
+    await store.put("k-old", Buffer.from("old bytes"), "text/plain");
+    await store.put("k-fresh", Buffer.from("fresh bytes"), "text/plain");
+    await db.query(
+      `INSERT INTO resume_documents (account_id, storage_key, superseded_at)
+       VALUES ($1, 'k-old', $2), ($1, 'k-fresh', $3)`,
+      [acct.rows[0].id, new Date(t0.getTime() - 40 * DAY), new Date(t0.getTime() - 5 * DAY)]
+    );
+    const results = await runRetentionSweep(db, t0, store);
+    expect(results.resumeGraceMarked).toBe(1);
+    expect(results.resumeArtifactsDeleted).toBe(1);
+    expect(await store.get("k-old")).toBeNull();
+    expect(await store.get("k-fresh")).not.toBeNull();
+    const rows = await db.query<{ storage_key: string; deleted_at: Date | null }>(
+      "SELECT storage_key, deleted_at FROM resume_documents ORDER BY storage_key"
+    );
+    expect(rows.rows.find((r) => r.storage_key === "k-old")!.deleted_at).not.toBeNull();
+    expect(rows.rows.find((r) => r.storage_key === "k-fresh")!.deleted_at).toBeNull();
   });
 });

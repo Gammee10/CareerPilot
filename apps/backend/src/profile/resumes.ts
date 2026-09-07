@@ -108,6 +108,14 @@ export async function completeUpload(
        VALUES ($1, $2, $3, $4, $5) RETURNING id`,
       [accountId, objectKey, sha256, body.byteLength, contentType]
     );
+    // Replacement lifecycle (ADR-020/C7): a new upload supersedes all prior
+    // raw resumes for the account, starting their 30-day grace period. The
+    // freshly uploaded document stays current (superseded_at NULL).
+    await client.query(
+      `UPDATE resume_documents SET superseded_at = $3
+        WHERE account_id = $1 AND id <> $2 AND superseded_at IS NULL`,
+      [accountId, inserted.rows[0].id, now]
+    );
     await recordAudit(client, {
       actorType: "user",
       actorAccountId: accountId,
