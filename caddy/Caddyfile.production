@@ -20,8 +20,24 @@
 		-Server
 	}
 
-	# Authoritative application API (prefix stripped before proxying).
-	handle_path /api/* {
+	# H9 minimization: single-use link tokens arrive as ?token= query strings
+	# on these pages — skip access logging for them (see dev Caddyfile).
+	handle /signin* {
+		log_skip
+		reverse_proxy frontend:3000
+	}
+	handle /closure* {
+		log_skip
+		reverse_proxy frontend:3000
+	}
+	handle /activate* {
+		log_skip
+		reverse_proxy frontend:3000
+	}
+
+	# Authoritative application API. `handle` (NOT `handle_path`) preserves
+	# the /api prefix: backend routes are defined with it (see dev Caddyfile).
+	handle /api/* {
 		reverse_proxy backend:8080
 	}
 

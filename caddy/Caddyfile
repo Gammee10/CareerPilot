@@ -19,8 +19,28 @@
 		-Server
 	}
 
-	# Authoritative application API (prefix stripped before proxying).
-	handle_path /api/* {
+	# H9 minimization: single-use link tokens arrive as ?token= query strings
+	# on these pages. Skip access logging for them entirely — a default access
+	# log would otherwise capture the full URI including the bearer secret
+	# (the largest ADR-015 hole). API bearer material (resume grants) travels
+	# in the X-Grant-Token header, which access logs never record.
+	handle /signin* {
+		log_skip
+		reverse_proxy frontend:3000
+	}
+	handle /closure* {
+		log_skip
+		reverse_proxy frontend:3000
+	}
+	handle /activate* {
+		log_skip
+		reverse_proxy frontend:3000
+	}
+
+	# Authoritative application API. `handle` (NOT `handle_path`) preserves
+	# the /api prefix: backend routes are defined with it, so stripping
+	# would 404 every browser API call (the prefix is part of the route).
+	handle /api/* {
 		reverse_proxy backend:8080
 	}
 

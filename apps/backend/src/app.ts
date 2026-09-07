@@ -208,12 +208,15 @@ export function buildApp(deps: AppDeps): Express {
   });
 
   // Liveness: process is up; no dependency checks, no sensitive detail.
-  app.get("/healthz", (_req, res) => {
+  // The /api-prefixed aliases exist because Caddy preserves the /api prefix
+  // when proxying (handle, not handle_path) — including for its own
+  // container healthcheck on /api/healthz.
+  app.get(["/healthz", "/api/healthz"], (_req, res) => {
     res.status(200).json({ status: "ok" });
   });
 
   // Readiness: authoritative datastore reachable.
-  app.get("/readyz", async (_req, res) => {
+  app.get(["/readyz", "/api/readyz"], async (_req, res) => {
     try {
       await db.query("SELECT 1");
       res.status(200).json({ status: "ready" });
@@ -482,14 +485,21 @@ export function buildApp(deps: AppDeps): Express {
     }
   );
 
-  // Token-scoped upload: the grant itself authorizes this request.
-  app.put("/api/resume/upload/:grantToken", express.raw({ type: () => true, limit: "11mb" }), async (req, res) => {
+  // Token-scoped upload: the grant itself authorizes this request. The grant
+  // travels in the X-Grant-Token header (H9) — never in the URL path, so it
+  // cannot land in proxy access logs, shell history, or Referer headers.
+  app.put("/api/resume/upload", express.raw({ type: () => true, limit: "11mb" }), async (req, res) => {
+    const grantToken = String(req.headers["x-grant-token"] ?? "");
+    if (!grantToken) {
+      res.status(403).json({ error: "invalid_grant" });
+      return;
+    }
     const contentType = String(req.headers["content-type"] ?? "").split(";")[0];
     const body = Buffer.isBuffer(req.body) ? req.body : Buffer.from(req.body ?? "");
     const result = await completeUpload(
       db,
       store,
-      String(req.params.grantToken),
+      grantToken,
       body,
       contentType,
       nowFn()
@@ -522,8 +532,14 @@ export function buildApp(deps: AppDeps): Express {
     }
   );
 
-  app.get("/api/resume/download/:grantToken", async (req, res) => {
-    const result = await downloadWithGrant(db, store, String(req.params.grantToken), nowFn());
+  app.get("/api/resume/download", async (req, res) => {
+    // H9: grant token in the header, never the URL path (see upload route).
+    const grantToken = String(req.headers["x-grant-token"] ?? "");
+    if (!grantToken) {
+      res.status(403).json({ error: "invalid_grant" });
+      return;
+    }
+    const result = await downloadWithGrant(db, store, grantToken, nowFn());
     if (!result.ok) {
       res.status(403).json({ error: "invalid_grant" });
       return;

@@ -58,9 +58,9 @@ describe("scoped resume upload/download", () => {
       expect(grantRes.status).toBe(201);
       const grant = grantRes.body as { token: string };
 
-      const upload = await fetch(`http://127.0.0.1:${port}/api/resume/upload/${grant.token}`, {
+      const upload = await fetch(`http://127.0.0.1:${port}/api/resume/upload`, {
         method: "PUT",
-        headers: { "content-type": "text/plain" },
+        headers: { "content-type": "text/plain", "x-grant-token": grant.token },
         body: "Experienced backend engineer with Go and PostgreSQL."
       });
       expect(upload.status).toBe(201);
@@ -86,15 +86,15 @@ describe("scoped resume upload/download", () => {
       const grantRes = await request(port, "POST", `/api/account/${accountId}/resume/upload-grant`, { cookie });
       const grant = (grantRes.body as { token: string }).token;
 
-      const first = await fetch(`http://127.0.0.1:${port}/api/resume/upload/${grant}`, {
+      const first = await fetch(`http://127.0.0.1:${port}/api/resume/upload`, {
         method: "PUT",
-        headers: { "content-type": "text/plain" },
+        headers: { "content-type": "text/plain", "x-grant-token": grant },
         body: "first"
       });
       expect(first.status).toBe(201);
-      const replay = await fetch(`http://127.0.0.1:${port}/api/resume/upload/${grant}`, {
+      const replay = await fetch(`http://127.0.0.1:${port}/api/resume/upload`, {
         method: "PUT",
-        headers: { "content-type": "text/plain" },
+        headers: { "content-type": "text/plain", "x-grant-token": grant },
         body: "second"
       });
       expect(replay.status).toBe(403);
@@ -108,29 +108,66 @@ describe("scoped resume upload/download", () => {
       const { accountId } = meRes.body as { accountId: string };
       const grantRes = await request(port, "POST", `/api/account/${accountId}/resume/upload-grant`, { cookie });
       const grant = (grantRes.body as { token: string }).token;
-      const bad = await fetch(`http://127.0.0.1:${port}/api/resume/upload/${grant}`, {
+      const bad = await fetch(`http://127.0.0.1:${port}/api/resume/upload`, {
         method: "PUT",
-        headers: { "content-type": "application/x-msdownload" },
+        headers: { "content-type": "application/x-msdownload", "x-grant-token": grant },
         body: "evil"
       });
       expect(bad.status).toBe(415);
       // Grant was not consumed by the failed attempt? It WAS not claimed
       // because type check precedes the claim.
-      const again = await fetch(`http://127.0.0.1:${port}/api/resume/upload/${grant}`, {
+      const again = await fetch(`http://127.0.0.1:${port}/api/resume/upload`, {
         method: "PUT",
-        headers: { "content-type": "text/plain" },
+        headers: { "content-type": "text/plain", "x-grant-token": grant },
         body: "fine"
       });
       expect(again.status).toBe(201);
     });
   });
 
+  it("H9: grant tokens in URL paths are gone; header transport is the only sink", async () => {
+    const { cookie } = await setupUserWithCookie("pathless@example.invalid");
+    await withServer(h.app, async (port) => {
+      const meRes = await request(port, "GET", "/api/me", { cookie });
+      const { accountId } = meRes.body as { accountId: string };
+      const grantRes = await request(port, "POST", `/api/account/${accountId}/resume/upload-grant`, { cookie });
+      const grant = (grantRes.body as { token: string }).token;
+      // The old path-param routes no longer exist (unknown-route 404, and no
+      // bearer secret ever appears in a request line again).
+      const pathForm = await fetch(`http://127.0.0.1:${port}/api/resume/upload/${grant}`, {
+        method: "PUT",
+        headers: { "content-type": "text/plain" },
+        body: "path smuggling attempt"
+      });
+      expect(pathForm.status).toBe(404);
+      // Missing header fails closed without touching the grant.
+      const headless = await fetch(`http://127.0.0.1:${port}/api/resume/upload`, {
+        method: "PUT",
+        headers: { "content-type": "text/plain" },
+        body: "no grant header"
+      });
+      expect(headless.status).toBe(403);
+      // Header form still works (grant unconsumed by the two failures above).
+      const ok = await fetch(`http://127.0.0.1:${port}/api/resume/upload`, {
+        method: "PUT",
+        headers: { "content-type": "text/plain", "x-grant-token": grant },
+        body: "header grant works"
+      });
+      expect(ok.status).toBe(201);
+    });
+  });
+
   it("direct unauthenticated object access fails (T3.1 AC)", async () => {
     await setupUserWithCookie("locked@example.invalid");
     await withServer(h.app, async (port) => {
-      // No object route exists without a valid grant token.
-      const direct = await fetch(`http://127.0.0.1:${port}/api/resume/download/not-a-real-grant`);
+      // No object route exists without a valid grant header.
+      const direct = await fetch(`http://127.0.0.1:${port}/api/resume/download`, {
+        headers: { "x-grant-token": "not-a-real-grant" }
+      });
       expect(direct.status).toBe(403);
+      // The old path-param download route is gone entirely.
+      const pathForm = await fetch(`http://127.0.0.1:${port}/api/resume/download/not-a-real-grant`);
+      expect(pathForm.status).toBe(404);
       // Listing someone's documents requires a session.
       const list = await request(port, "GET", "/api/account/00000000-0000-0000-0000-00000000f000/resume");
       expect(list.status).toBe(401);

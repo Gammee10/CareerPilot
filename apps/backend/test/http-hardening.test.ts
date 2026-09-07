@@ -1,5 +1,6 @@
-// H10/H11/M6 — HTTP hardening: security headers, body-limit handling, auth
-// rate limits, cookie flags, UUID param guards.
+// H10/H11/M6 + /api-prefix routing — HTTP hardening: security headers,
+// body-limit handling, auth rate limits, cookie flags, UUID param guards,
+// and the Caddy-preserved /api prefix on health probes.
 import { describe, it, expect, beforeEach, afterAll } from "vitest";
 import {
   makeHarness,
@@ -164,5 +165,15 @@ describe("HTTP hardening (H10)", () => {
     } finally {
       await fixed.close();
     }
+  });
+
+  it("/api-prefixed health probes match backend routes (Caddy preserves the prefix)", async () => {
+    await withServer(h.app, async (port) => {
+      for (const path of ["/healthz", "/api/healthz", "/readyz", "/api/readyz"]) {
+        const res = await request(port, "GET", path);
+        expect(res.status).toBe(200);
+        expect(res.body).toMatchObject({ status: expect.any(String) });
+      }
+    });
   });
 });

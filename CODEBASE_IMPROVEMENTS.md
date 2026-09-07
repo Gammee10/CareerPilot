@@ -478,6 +478,17 @@ Most important areas requiring attention:
   briefly if needed, then remove).
 - **Suggested validation:** Manual log inspection after hitting each sensitive route;
   automated test asserting no token pattern in emitted access log fixture.
+- **Status: Completed 2026-09-07** — grant tokens moved from URL path to the
+  `X-Grant-Token` header (`PUT /api/resume/upload`, `GET /api/resume/download`;
+  old path routes removed, no compat needed — no API consumers exist
+  pre-onboarding); Caddy `log_skip` on the `?token=` frontend pages
+  (`/signin*`, `/closure*`, `/activate*`), verified in the adapted JSON
+  (`log_skip: true`) with both Caddyfiles passing `caddy validate`. Backend
+  URIs now carry no bearer material at all (all link tokens travel in JSON
+  bodies, which access logs never record), so `/api/*` access logging stays
+  intact for ops forensics — a deliberate deviation from blanket-skipping the
+  API prefixes, recorded here. Tests: header-only transport (path form 404s,
+  headless 403s, grant unconsumed by failures).
 
 ### H10. No HTTP rate limiting, security headers, or hardening middleware
 
@@ -1123,6 +1134,33 @@ Most important areas requiring attention:
   `tsx` with compiled output, add Dependabot + SBOM (`cyclonedx`) + audit steps.
 - **Suggested validation:** Reproducible `npm ci` + `pip install --require-hashes`
   from clean cache; SBOM artifact in CI.
+
+---
+
+## Post-Audit Findings (added during implementation)
+
+### X1. Caddy stripped the `/api` prefix — every browser API call 404'd in deployment
+
+- **Category:** Reliability / Deployment
+- **Severity:** Critical
+- **Location:** `caddy/Caddyfile`, `caddy/Caddyfile.production`
+  (`handle_path /api/*`); found 2026-09-07 during H9 validation via `caddy adapt`
+  (emits `strip_path_prefix: /api`) and confirmed live (`/api/me` → 404 through
+  Caddy instead of 401).
+- **Problem at discovery:** `handle_path` strips the matched prefix before
+  proxying, but backend routes are defined WITH the `/api` prefix — so in any
+  Compose deployment every frontend API call fell through to the backend
+  unknown-route 404. The stack looked "healthy" because only pages and the
+  prefix-less `/healthz` were ever probed through Caddy. Direct-to-backend
+  tests never caught it (they bypass Caddy).
+- **Fix applied 2026-09-07:** `handle_path` → `handle` (prefix preserved) in
+  both Caddyfiles, plus `/api/healthz` + `/api/readyz` backend aliases so the
+  Caddy container healthcheck keeps passing.
+- **Validation performed:** `caddy validate` on both files; new vitest case
+  covering all four health paths; live dev-stack probes after rebuild —
+  `/api/me` → 401 (was 404), `/api/healthz` → 200, `/` → 200, all containers
+  healthy.
+- **Status: Completed 2026-09-07**
 
 ---
 
