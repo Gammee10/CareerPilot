@@ -30,6 +30,19 @@ done
 [ "$READY" = "1" ] || { echo "FAILED: test db never ready"; exit 1; }
 
 docker exec "$PGC" apk add --no-cache openssl >/dev/null 2>&1
+# CI reliability: the openssl provisioning above is the only unguarded
+# infrastructure step — a silent failure here used to surface minutes later
+# as an inscrutable backup failure. Retry transient registry/DNS flakes and
+# then verify loudly (CI #41 failed the backup step with no diagnosis).
+if ! docker exec "$PGC" openssl version >/dev/null 2>&1; then
+  for _ in 1 2 3; do
+    sleep 5
+    docker exec "$PGC" apk add --no-cache openssl >/dev/null 2>&1 || true
+    docker exec "$PGC" openssl version >/dev/null 2>&1 && break
+  done
+fi
+docker exec "$PGC" openssl version >/dev/null 2>&1 \
+  || { echo "FAILED: apk-openssl (openssl unavailable in test container)"; exit 1; }
 
 # Apply the real schema migrations so the dump has the authoritative model.
 docker exec "$PGC" sh -c '
