@@ -351,6 +351,15 @@ export function buildApp(deps: AppDeps): Express {
         ai
       );
       if (!result.ok) {
+        if (result.reason === "account_inactive") {
+          res.status(409).json({ error: result.reason });
+          return;
+        }
+        if (result.reason === "rate_limited") {
+          res.setHeader("Retry-After", "3600");
+          res.status(429).json({ error: result.reason });
+          return;
+        }
         res.status(404).json({ error: result.reason });
         return;
       }

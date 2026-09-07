@@ -255,6 +255,12 @@ Most important areas requiring attention:
   engine entry; thread `accountId` from the route (already `requireSelf`).
 - **Suggested validation:** Auth test: suspended account → refused with no AI call;
   cross-account job → 404.
+- **Status: Completed 2026-09-07** — engine verifies `accounts.state='active'`
+  first (`account_inactive`, no AI spend) and enforces a 30/hour per-account
+  evaluation budget (`rate_limited`, route → 429 + Retry-After); route maps
+  409/429/404 accordingly. Deliberate deviation: no pre-existing-evaluation
+  scoping, since evaluating a new job is the endpoint's purpose — the budget
+  bounds the AI-burn vector instead.
 
 ### H2. Bearer-token acceptance undermines the HttpOnly session cookie
 

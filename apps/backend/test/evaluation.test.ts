@@ -389,6 +389,61 @@ describe("engine integration", () => {
     const kinds = row.rows[0].explanation.map((c) => c.kind);
     expect(kinds).toContain("exclusion");
   });
+
+  it("suspended account is refused with no AI call (H1)", async () => {
+    const seeded = await seedJobWithEvaluation();
+    await db.query("UPDATE accounts SET state = 'suspended', suspended_at = $2 WHERE id = $1", [
+      seeded.accountId, t0
+    ]);
+    let aiCalls = 0;
+    const ai = {
+      requestExtraction: async () => {
+        aiCalls++;
+        return {};
+      }
+    };
+    const result = await evaluateJobForUser(db, seeded.accountId, seeded.jobId, t0, ai);
+    expect(result).toEqual({ ok: false, reason: "account_inactive" });
+    expect(aiCalls).toBe(0);
+  });
+
+  it("hourly per-account evaluation budget is enforced before any AI call (H1)", async () => {
+    const seeded = await seedJobWithEvaluation();
+    const { EVALUATION_HOURLY_LIMIT } = await import("../src/evaluation/engine.js");
+    // Seed spends up to the budget (one snapshot already exists from seeding).
+    const { createEvaluationSnapshot } = await import("../src/evaluation/snapshot.js");
+    const pv = await db.query<{ id: string }>(
+      "SELECT current_profile_version_id AS id FROM career_profiles WHERE account_id = $1",
+      [seeded.accountId]
+    );
+    for (let i = 1; i < EVALUATION_HOURLY_LIMIT; i++) {
+      await createEvaluationSnapshot(
+        db,
+        {
+          accountId: seeded.accountId,
+          canonicalJobId: seeded.jobId,
+          profileVersionId: pv.rows[0].id,
+          inputObservationId: null,
+          eligibility: "confirmed",
+          constraintFailures: [],
+          dimensions: [],
+          explanation: [],
+          score: 50
+        },
+        t0
+      );
+    }
+    let aiCalls = 0;
+    const ai = {
+      requestExtraction: async () => {
+        aiCalls++;
+        return {};
+      }
+    };
+    const result = await evaluateJobForUser(db, seeded.accountId, seeded.jobId, t0, ai);
+    expect(result).toEqual({ ok: false, reason: "rate_limited" });
+    expect(aiCalls).toBe(0);
+  });
 });
 
 describe("T6.5 — bounded re-evaluation after material profile change", () => {

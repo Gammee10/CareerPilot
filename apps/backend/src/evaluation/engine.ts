@@ -17,7 +17,12 @@ import { redactIdentifiers } from "../profile/minimization.js";
 
 export type EvaluationResult =
   | { ok: true; evaluationId: string; eligibility: string; aiUsed: boolean }
-  | { ok: false; reason: "job_not_found" | "profile_missing" };
+  | { ok: false; reason: "job_not_found" | "profile_missing" | "account_inactive" | "rate_limited" };
+
+// Per-account evaluation rate limit: bounds AI spend from the unevaluated
+// evaluate endpoint (H1). Generous for legitimate use; reevaluation batches
+// go through pg-boss (H16) rather than this inline path.
+export const EVALUATION_HOURLY_LIMIT = 30;
 
 export async function evaluateJobForUser(
   db: Pool,
@@ -26,6 +31,24 @@ export async function evaluateJobForUser(
   now: Date,
   ai?: AiClient
 ): Promise<EvaluationResult> {
+  // Active-account gate BEFORE any AI spend (H1): suspended/closed accounts
+  // cannot trigger provider calls or create snapshots.
+  const acct = await db.query<{ state: string }>(
+    "SELECT state FROM accounts WHERE id = $1",
+    [accountId]
+  );
+  if (!acct.rows[0] || acct.rows[0].state !== "active") {
+    return { ok: false, reason: "account_inactive" };
+  }
+  const recent = await db.query<{ count: string }>(
+    `SELECT COUNT(*) AS count FROM evaluations
+      WHERE account_id = $1 AND created_at > $2`,
+    [accountId, new Date(now.getTime() - 3_600_000)]
+  );
+  if (Number(recent.rows[0].count) >= EVALUATION_HOURLY_LIMIT) {
+    return { ok: false, reason: "rate_limited" };
+  }
+
   const view = await loadJobView(db, canonicalJobId);
   if (!view) return { ok: false, reason: "job_not_found" };
 
