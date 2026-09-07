@@ -379,7 +379,7 @@ export function buildApp(deps: AppDeps): Express {
       res.status(code).json({ error: result.reason });
       return;
     }
-    await runExtraction(db, store, ai, result.resumeDocumentId, nowFn());
+    await runExtraction(db, store, ai, result.accountId, result.resumeDocumentId, nowFn());
     res.status(201).json({ resumeDocumentId: result.resumeDocumentId });
   });
 
@@ -435,6 +435,7 @@ export function buildApp(deps: AppDeps): Express {
         db,
         store,
         ai,
+        req.auth!.accountId,
         String(req.params.documentId),
         nowFn()
       );

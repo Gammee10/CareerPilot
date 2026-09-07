@@ -17,17 +17,20 @@ export async function runExtraction(
   db: Pool,
   store: ObjectStore,
   ai: AiClient,
+  accountId: string,
   resumeDocumentId: string,
   _now: Date
 ): Promise<ExtractionOutcome> {
+  // Ownership-scoped: the document must belong to the calling account (C4).
+  // Cross-account attempts fail closed as document_not_found (non-disclosing).
   const doc = await db.query<{
     account_id: string;
     storage_key: string;
     content_type: string;
     sha256: string | null;
   }>(
-    "SELECT account_id, storage_key, content_type, sha256 FROM resume_documents WHERE id = $1",
-    [resumeDocumentId]
+    "SELECT account_id, storage_key, content_type, sha256 FROM resume_documents WHERE id = $1 AND account_id = $2",
+    [resumeDocumentId, accountId]
   );
   if (doc.rows.length === 0) return { ok: false, reason: "document_not_found" };
   const document = doc.rows[0];

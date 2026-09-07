@@ -62,7 +62,7 @@ export async function createDownloadGrant(
 }
 
 export type UploadResult =
-  | { ok: true; resumeDocumentId: string }
+  | { ok: true; resumeDocumentId: string; accountId: string }
   | { ok: false; reason: "invalid_grant" | "unsupported_type" | "too_large" };
 
 export async function completeUpload(
@@ -117,7 +117,7 @@ export async function completeUpload(
       targetId: inserted.rows[0].id
     });
     await client.query("COMMIT");
-    return { ok: true, resumeDocumentId: inserted.rows[0].id };
+    return { ok: true, resumeDocumentId: inserted.rows[0].id, accountId };
   } catch (err) {
     await client.query("ROLLBACK").catch(() => undefined);
     throw err;

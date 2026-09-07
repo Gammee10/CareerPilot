@@ -146,6 +146,11 @@ Most important areas requiring attention:
      no AI call).
 - **Suggested validation:** New authorization test asserting 404 + zero AI invocations
   on cross-account extraction; run `authorization.test.ts`.
+- **Status: Completed 2026-09-07** — `runExtraction` now takes `accountId` and
+  constrains the document lookup with `AND account_id = $2` (non-disclosing
+  `document_not_found`); upload route passes the grant-derived owner, extract
+  route passes the session account, worker payload carries `accountId`;
+  `completeUpload` returns the owner; unit + HTTP cross-account tests added.
 
 ### C5. Job detail endpoint has no ownership/evaluation check (enumerable by UUID)
 

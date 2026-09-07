@@ -8,7 +8,10 @@ import {
   createBootstrapAdmin,
   makeHarness,
   RecordingAiClient,
+  request,
   resetDb,
+  sessionCookie,
+  withServer,
   type Harness
 } from "./helpers.js";
 
@@ -32,7 +35,7 @@ afterAll(async () => {
   await h.close();
 });
 
-async function uploadTextResume(text: string): Promise<string> {
+async function uploadTextResume(text: string): Promise<{ docId: string; accountId: string }> {
   const adminId = await createBootstrapAdmin(h.db, "admin@example.invalid");
   const user = await createActiveUser(h, "candidate@example.invalid", adminId, t0);
   const { createUploadGrant, completeUpload } = await import("../src/profile/resumes.js");
@@ -46,7 +49,7 @@ async function uploadTextResume(text: string): Promise<string> {
     t0
   );
   if (!uploaded.ok) throw Error("setup upload failed");
-  return uploaded.resumeDocumentId;
+  return { docId: uploaded.resumeDocumentId, accountId: uploaded.accountId };
 }
 
 describe("minimization boundary (ADR-054)", () => {
@@ -76,10 +79,10 @@ describe("minimization boundary (ADR-054)", () => {
       "Sam Person, sam.person@corp.example, +44 20 7946 0958",
       "See https://sam.example.io and resume_2026.pdf"
     ].join("\n");
-    const docId = await uploadTextResume(raw);
+    const { docId, accountId } = await uploadTextResume(raw);
     const ai = new RecordingAiClient(() => VALID_PROPOSAL);
 
-    await runExtraction(h.db, store, ai, docId, t0);
+    await runExtraction(h.db, store, ai, accountId, docId, t0);
 
     expect(ai.sentTasks).toHaveLength(1);
     const sent = JSON.stringify(ai.sentTasks[0]);
@@ -100,9 +103,9 @@ describe("Node-side proposal validation (ADR-029/054)", () => {
     ["skills not strings", { ...VALID_PROPOSAL, skills: [42] }],
     ["year nonsense", { ...VALID_PROPOSAL, education: [{ degree: "X", institution: "Y", year: 30251 }] }]
   ])("rejects malformed output (%s) without persisting anything", async (_label, bad) => {
-    const docId = await uploadTextResume("Some text content for extraction.");
+    const { docId, accountId } = await uploadTextResume("Some text content for extraction.");
     const ai = new RecordingAiClient(() => bad);
-    const result = await runExtraction(h.db, store, ai, docId, t0);
+    const result = await runExtraction(h.db, store, ai, accountId, docId, t0);
     expect(result.ok).toBe(false);
     if (result.ok) return;
     expect(result.reason).toBe("malformed_output");
@@ -117,21 +120,21 @@ describe("Node-side proposal validation (ADR-029/054)", () => {
   });
 
   it("provider unavailability produces a truthful failure, not a draft", async () => {
-    const docId = await uploadTextResume("More text.");
+    const { docId, accountId } = await uploadTextResume("More text.");
     const ai = new RecordingAiClient(() => new Error("ai_unavailable"));
-    const result = await runExtraction(h.db, store, ai, docId, t0);
+    const result = await runExtraction(h.db, store, ai, accountId, docId, t0);
     expect(result).toEqual({ ok: false, reason: "ai_unavailable" });
     const drafts = await h.db.query("SELECT id FROM resume_extraction_drafts");
     expect(drafts.rows).toHaveLength(0);
   });
 
   it("valid proposals persist exactly one ready draft", async () => {
-    const docId = await uploadTextResume("Good text.");
+    const { docId, accountId } = await uploadTextResume("Good text.");
     const ai = new RecordingAiClient(() => VALID_PROPOSAL);
-    const first = await runExtraction(h.db, store, ai, docId, t0);
+    const first = await runExtraction(h.db, store, ai, accountId, docId, t0);
     expect(first.ok).toBe(true);
     // Idempotent re-run (retry after crash before ack): no duplicate draft.
-    const second = await runExtraction(h.db, store, ai, docId, t0);
+    const second = await runExtraction(h.db, store, ai, accountId, docId, t0);
     expect(second).toMatchObject({ ok: true, reusedExisting: true });
 
     const drafts = await h.db.query(
@@ -140,5 +143,41 @@ describe("Node-side proposal validation (ADR-029/054)", () => {
     );
     expect(drafts.rows).toHaveLength(1);
     expect(drafts.rows[0].status).toBe("ready");
+  });
+
+  it("cross-account extraction fails closed with zero AI invocations (C4)", async () => {
+    const { docId } = await uploadTextResume("Victim text.");
+    const ai = new RecordingAiClient(() => VALID_PROPOSAL);
+    const adminId = await createBootstrapAdmin(h.db, "admin2@example.invalid");
+    const attacker = await createActiveUser(h, "attacker@example.invalid", adminId, t0);
+    const result = await runExtraction(h.db, store, ai, attacker.accountId, docId, t0);
+    expect(result).toEqual({ ok: false, reason: "document_not_found" });
+    expect(ai.sentTasks).toHaveLength(0);
+  });
+
+  it("cross-account extraction over HTTP returns 404 (C4)", async () => {
+    const { docId } = await uploadTextResume("Victim text http.");
+    const adminId = await createBootstrapAdmin(h.db, "admin3@example.invalid");
+    const attacker = await createActiveUser(h, "attacker@example.invalid", adminId, t0);
+    const { requestSignInLink, confirmSignInLink } = await import(
+      "../src/identity/signinLinks.js"
+    );
+    await withServer(h.app, async (port) => {
+      const link = await requestSignInLink(h.db, "attacker@example.invalid", t0);
+      if (!link.ok) throw Error("setup signin");
+      await confirmSignInLink(h.db, link.token, t0);
+      const redeem = await request(port, "POST", "/api/auth/signin-link/redeem", {
+        body: { token: link.token }
+      });
+      expect(redeem.status).toBe(200);
+      const res = await request(
+        port,
+        "POST",
+        `/api/account/${attacker.accountId}/resume/${docId}/extract`,
+        { cookie: sessionCookie(redeem) }
+      );
+      expect(res.status).toBe(404);
+      expect(res.body).toEqual({ error: "document_not_found" });
+    });
   });
 });

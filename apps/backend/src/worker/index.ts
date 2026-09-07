@@ -52,12 +52,12 @@ async function main(): Promise<void> {
   );
 
   // Extraction jobs carry a resume document id (T3.2 work unit).
-  await boss.work<{ resumeDocumentId: string }>(
+  await boss.work<{ resumeDocumentId: string; accountId: string }>(
     "extraction",
-    async (jobs: Job<{ resumeDocumentId: string }>[]) => {
+    async (jobs: Job<{ resumeDocumentId: string; accountId: string }>[]) => {
       const results = [];
       for (const job of jobs) {
-        const result = await runExtraction(pool, store, ai, job.data.resumeDocumentId, new Date());
+        const result = await runExtraction(pool, store, ai, job.data.accountId, job.data.resumeDocumentId, new Date());
         if (!result.ok && result.reason === "ai_unavailable") {
           throw new Error("transient_ai_unavailable"); // bounded retry
         }

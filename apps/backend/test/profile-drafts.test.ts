@@ -43,7 +43,7 @@ async function setupWithDraft(): Promise<{ accountId: string; draftId: string }>
   );
   if (!uploaded.ok) throw Error("setup");
   const ai = new RecordingAiClient(() => PROPOSAL);
-  const result = await runExtraction(h.db, store, ai, uploaded.resumeDocumentId, t0);
+  const result = await runExtraction(h.db, store, ai, user.accountId, uploaded.resumeDocumentId, t0);
   if (!result.ok) throw Error("setup extraction");
   return { accountId: user.accountId, draftId: result.draftId };
 }

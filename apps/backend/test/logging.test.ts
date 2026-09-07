@@ -70,7 +70,7 @@ describe("T8.1 — structured logging minimization", () => {
       if (!uploaded.ok) throw Error("setup upload");
 
       await import("../src/profile/extraction.js").then((m) =>
-        m.runExtraction(h.db, store, ai, uploaded.resumeDocumentId, t0)
+        m.runExtraction(h.db, store, ai, acct.accountId, uploaded.resumeDocumentId, t0)
       );
 
       await import("../src/profile/profileVersions.js").then((m) =>
