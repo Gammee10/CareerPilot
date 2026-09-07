@@ -857,6 +857,14 @@ Most important areas requiring attention:
 - **Suggested validation:** pytest for oversized input (400/413), timeout fixture
   (502, no traceback), malformed upstream (502 `unparseable_output`), identifier
   probe (see O-findings).
+- **Status: Completed 2026-09-07** — explicit delimiter wrapping, 2048-token
+  generation bound, network/timeout → 503 vs HTTP → 502 mapping (no traceback),
+  outer-JSON + non-object-proposal guards, allowlisted `GEMINI_MODEL` (fallback
+  to default) and `LOG_LEVEL`; Node maps task rejections 400/422 to terminal
+  `malformed_output` instead of retryable unavailability. Tests: `pytest`
+  tripwire (4 identifier classes, no upstream call), minimized-like content
+  pass-through, 503/502 mappings, allowlist fallback; vitest rejected-task
+  terminality.
 
 ---
 
@@ -996,6 +1004,11 @@ Most important areas requiring attention:
   UUID patterns) that rejects with 400 before calling upstream. Node remains
   authoritative; this is a tripwire.
 - **Suggested validation:** pytest with identifier-laden content → 400, no upstream call.
+- **Status: Completed 2026-09-07** — implemented together with M14 (same
+  service boundary, one logical change): email/phone/URL/UUID scan mirroring
+  `minimization.ts` patterns rejects with 400 `identifier_detected` before any
+  upstream call; Node remains authoritative. Covered by the M14 pytest tripwire
+  suite.
 
 ### O2. Metrics, tracing, and queue-depth observability
 

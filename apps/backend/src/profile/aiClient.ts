@@ -38,6 +38,10 @@ export class HttpAiClient implements AiClient {
       headers,
       body: JSON.stringify(task)
     });
+    // M14: transient-vs-nontransient mapping for ADR-044. Rejections of the
+    // task itself (identifier tripwire 400, shape validation 422) are never
+    // retried — the task would be rejected identically on redelivery.
+    if (res.status === 400 || res.status === 422) throw new Error("ai_rejected_task");
     if (!res.ok) throw new Error(`ai_unavailable:${res.status}`);
     const json = await res.json();
     return json?.proposal;

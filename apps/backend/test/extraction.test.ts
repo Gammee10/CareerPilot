@@ -128,6 +128,17 @@ describe("Node-side proposal validation (ADR-029/054)", () => {
     expect(drafts.rows).toHaveLength(0);
   });
 
+  it("M14: rejected tasks are terminal malformed_output, never retried as unavailable", async () => {
+    const { docId, accountId } = await uploadTextResume("Rejected text.");
+    const ai = new RecordingAiClient(() => new Error("ai_rejected_task"));
+    const result = await runExtraction(h.db, store, ai, accountId, docId, t0);
+    expect(result).toEqual({ ok: false, reason: "malformed_output" });
+    const audit = await h.db.query(
+      "SELECT action FROM audit_events WHERE action = 'extraction.rejected_malformed'"
+    );
+    expect(audit.rows.length).toBeGreaterThanOrEqual(1);
+  });
+
   it("valid proposals persist exactly one ready draft", async () => {
     const { docId, accountId } = await uploadTextResume("Good text.");
     const ai = new RecordingAiClient(() => VALID_PROPOSAL);
@@ -181,8 +192,7 @@ describe("Node-side proposal validation (ADR-029/054)", () => {
     });
   });
 
-  it("H4: parallel duplicate extractions persist exactly one draft", async () => {
-    const { docId, accountId } = await uploadTextResume("Parallel text.");
+  it("H4: parallel duplicate extractions persist exactly one draft", async () => {    const { docId, accountId } = await uploadTextResume("Parallel text.");
     const ai = new RecordingAiClient(() => VALID_PROPOSAL);
     const [a, b] = await Promise.all([
       runExtraction(h.db, store, ai, accountId, docId, t0),

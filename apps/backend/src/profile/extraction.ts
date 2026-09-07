@@ -82,7 +82,21 @@ export async function runExtraction(
   let proposalRaw: unknown;
   try {
     proposalRaw = await ai.requestExtraction(task);
-  } catch {
+  } catch (err) {
+    // M14: a rejected task (identifier tripwire / shape validation) is
+    // terminal — redelivery would be rejected identically, so it surfaces as
+    // malformed_output, not as retryable unavailability.
+    if (err instanceof Error && err.message === "ai_rejected_task") {
+      await recordAudit(db, {
+        actorType: "capability",
+        action: "extraction.rejected_malformed",
+        outcome: "failure",
+        targetCategory: "resume_document",
+        targetId: resumeDocumentId,
+        details: { reason: "task_rejected" }
+      });
+      return { ok: false, reason: "malformed_output" };
+    }
     await recordAudit(db, {
       actorType: "capability",
       action: "extraction.failed",
