@@ -319,6 +319,11 @@ Most important areas requiring attention:
   transaction; on failure roll back so the link remains redeemable. Add a crash-window
   test (mock failure between steps → link still valid).
 - **Suggested validation:** Fault-injection test for both closure and sign-in paths.
+- **Status: Completed 2026-09-07** — redeem + effect now share one transaction:
+  sign-in link consume + session issue (role derived server-side inside the
+  tx), closure consume + `closeAccount` via outer-client join, invitation
+  accept + first session. Any failure rolls back so the link stays redeemable;
+  suspend-then-redeem test proves link preservation + post-reactivation retry.
 
 ### H4. Check-then-insert races: extraction idempotency, version numbering, canonicalization
 
@@ -598,6 +603,9 @@ Most important areas requiring attention:
   deny. Add a test for suspend-then-redeem.
 - **Suggested validation:** Integration test: suspend after confirm → redeem refused,
   link still redeemable after reactivation (or clean re-request path).
+- **Status: Completed 2026-09-07** — inactive-account check now runs inside the
+  redeem transaction with ROLLBACK (no `redeemed_at` burn); covered by the new
+  H3/M1 suspend-then-redeem → reactivate → redeem-succeeds test.
 
 ### M2. Sign-in rate-limit check-then-insert races under concurrency
 
@@ -622,6 +630,9 @@ Most important areas requiring attention:
 - **Recommended improvement:** Move the SELECT … FOR UPDATE inside the redeem/close
   transaction.
 - **Suggested validation:** Code review + concurrent closure test.
+- **Status: Completed 2026-09-07** — the `SELECT … FOR UPDATE` closed-check in
+  `requestClosureConfirmation` moved inside the confirmation transaction (same
+  change as H3); no more pool-level no-op lock.
 
 ### M4. `updateSearchStrategy` wipes unspecified fields; no size validation
 

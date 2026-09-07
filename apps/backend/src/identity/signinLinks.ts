@@ -4,6 +4,7 @@
 import type { Pool } from "pg";
 import { recordAudit } from "./audit.js";
 import { generateToken, hashToken } from "./tokens.js";
+import { createSession } from "./sessions.js";
 import { config } from "../config.js";
 
 const MINUTE_MS = 60 * 1000;
@@ -120,7 +121,7 @@ export async function confirmSignInLink(
 // Step 2: actual redemption. Consumes the link exactly once and creates a
 // session. Every failure collapses to a single non-disclosing outcome.
 export type RedeemResult =
-  | { ok: true; accountId: string }
+  | { ok: true; accountId: string; sessionToken: string }
   | { ok: false };
 
 export async function redeemSignInLink(
@@ -128,6 +129,10 @@ export async function redeemSignInLink(
   token: string,
   now: Date
 ): Promise<RedeemResult> {
+  // Atomic redeem + session creation (H3): a crash between consuming the
+  // single-use link and issuing the session must not strand the user. The
+  // effect joins the consume transaction; any failure rolls the consume back
+  // so the link remains redeemable (M1 recovery path).
   const client = await db.connect();
   try {
     await client.query("BEGIN");
@@ -143,25 +148,28 @@ export async function redeemSignInLink(
       [hashToken(token), now]
     );
     if (updated.rows.length !== 1) {
-      await recordAudit(client, {
+      await client.query("ROLLBACK");
+      await recordAudit(db, {
         actorType: "system",
         action: "signin_link.redeemed",
         outcome: "failure",
         targetCategory: "signin_link",
         details: { reason: "unacceptable_link" }
       });
-      await client.query("COMMIT"); // persist the failure audit only
       return { ok: false };
     }
     const link = updated.rows[0];
 
-    const acct = await client.query<{ state: string }>(
-      "SELECT state FROM accounts WHERE id = $1 FOR UPDATE",
+    const acct = await client.query<{ state: string; is_admin: boolean }>(
+      "SELECT state, is_admin FROM accounts WHERE id = $1 FOR UPDATE",
       [link.account_id]
     );
     if (acct.rows[0]?.state !== "active") {
-      // Suspension/closure between confirm and redeem blocks authentication.
-      await recordAudit(client, {
+      // Suspension/closure between confirm and redeem blocks authentication
+      // WITHOUT burning the link: rollback leaves it redeemable after
+      // reactivation (or a clean re-request).
+      await client.query("ROLLBACK");
+      await recordAudit(db, {
         actorType: "system",
         action: "signin_link.redeemed",
         outcome: "denied",
@@ -169,10 +177,12 @@ export async function redeemSignInLink(
         targetId: link.id,
         details: { reason: "account_not_active" }
       });
-      await client.query("COMMIT");
       return { ok: false };
     }
 
+    // Role derives server-side from accounts.is_admin (never request input).
+    const role = acct.rows[0].is_admin === true ? "admin" : "user";
+    const session = await createSession(client, link.account_id, role, now);
     await recordAudit(client, {
       actorType: "user",
       actorAccountId: link.account_id,
@@ -182,7 +192,7 @@ export async function redeemSignInLink(
       targetId: link.id
     });
     await client.query("COMMIT");
-    return { ok: true, accountId: link.account_id };
+    return { ok: true, accountId: link.account_id, sessionToken: session.token };
   } catch (err) {
     await client.query("ROLLBACK").catch(() => undefined);
     throw err;

@@ -51,6 +51,10 @@ describe("invitation lifecycle", () => {
     if (!inv.ok) throw new Error("setup");
     const accept = await acceptInvitation(h.db, inv.token, now);
     expect(accept.ok).toBe(true);
+    if (!accept.ok) return;
+    // Atomic accept (H3): first session arrives with the acceptance itself.
+    const { validateSession } = await import("../src/identity/sessions.js");
+    expect((await validateSession(h.db, accept.sessionToken, now)).ok).toBe(true);
     const account = await h.db.query("SELECT state FROM accounts WHERE email = $1", [
       "newuser@example.invalid"
     ]);

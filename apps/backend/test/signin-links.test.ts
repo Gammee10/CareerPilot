@@ -5,7 +5,6 @@ import {
   redeemSignInLink,
   requestSignInLink
 } from "../src/identity/signinLinks.js";
-import { createSession } from "../src/identity/sessions.js";
 import {
   createActiveUser,
   createBootstrapAdmin,
@@ -249,10 +248,36 @@ describe("HTTP surface non-disclosure", () => {
     await confirmSignInLink(h.db, link.token, t0);
     const redeemed = await redeemSignInLink(h.db, link.token, t0);
     if (!redeemed.ok) throw Error("setup");
-    const session = await createSession(h.db, redeemed.accountId, "user", t0);
+    // Atomic redeem (H3): the session arrives with the redemption itself.
     void link;
-    expect((await validateSession(h.db, session.token, t0)).ok).toBe(true);
+    expect((await validateSession(h.db, redeemed.sessionToken, t0)).ok).toBe(true);
     await suspendAccount(h.db, redeemed.accountId, adminId, t0, {});
-    expect((await validateSession(h.db, session.token, t0)).ok).toBe(false);
+    expect((await validateSession(h.db, redeemed.sessionToken, t0)).ok).toBe(false);
+  });
+
+  it("suspend-then-redeem preserves the link; redeem succeeds after reactivation (H3/M1)", async () => {
+    const { adminId } = await setupUser();
+    const { suspendAccount, restoreAccount } = await import("../src/identity/accounts.js");
+    const { validateSession } = await import("../src/identity/sessions.js");
+    const link = await requestSignInLink(h.db, "user@example.invalid", t0);
+    if (!link.ok) throw Error("setup");
+    await confirmSignInLink(h.db, link.token, t0);
+    const me = await h.db.query<{ id: string }>(
+      "SELECT id FROM accounts WHERE email = 'user@example.invalid'"
+    );
+    await suspendAccount(h.db, me.rows[0].id, adminId, t0, {});
+    const denied = await redeemSignInLink(h.db, link.token, t0);
+    expect(denied).toEqual({ ok: false });
+    // Link not burned: still unredeemed.
+    const row = await h.db.query<{ redeemed_at: Date | null }>(
+      "SELECT redeemed_at FROM signin_links WHERE account_id = $1",
+      [me.rows[0].id]
+    );
+    expect(row.rows[0].redeemed_at).toBeNull();
+    await restoreAccount(h.db, me.rows[0].id, adminId, t0);
+    const retry = await redeemSignInLink(h.db, link.token, t0);
+    expect(retry.ok).toBe(true);
+    if (!retry.ok) throw Error("setup retry");
+    expect((await validateSession(h.db, retry.sessionToken, t0)).ok).toBe(true);
   });
 });

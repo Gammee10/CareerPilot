@@ -57,15 +57,19 @@ export async function requestClosureConfirmation(
   accountId: string,
   now: Date
 ): Promise<{ token: string; expiresAt: Date } | { error: "account_closed" }> {
-  const acct = await db.query<{ state: string }>(
-    "SELECT state FROM accounts WHERE id = $1 FOR UPDATE",
-    [accountId]
-  );
-  if (acct.rows[0]?.state === "closed") return { error: "account_closed" };
-
   const client = await db.connect();
   try {
     await client.query("BEGIN");
+    // Account-state lock lives INSIDE the confirmation transaction (M3): the
+    // earlier pool-level SELECT … FOR UPDATE released immediately and raced.
+    const acct = await client.query<{ state: string }>(
+      "SELECT state FROM accounts WHERE id = $1 FOR UPDATE",
+      [accountId]
+    );
+    if (acct.rows[0]?.state === "closed") {
+      await client.query("ROLLBACK");
+      return { error: "account_closed" };
+    }
     // A new confirmation link invalidates prior unused ones (ADR-018 rule).
     await client.query(
       `UPDATE signin_links SET invalidated_at = $2
@@ -107,6 +111,9 @@ export async function redeemClosureConfirmation(
   token: string,
   now: Date
 ): Promise<ClosureRedeemResult> {
+  // Atomic redeem + close (H3): the state-machine effect joins the consume
+  // transaction. A crash between them must not strand a consumed link with
+  // the account still open — failure rolls back so the link stays redeemable.
   const client = await db.connect();
   try {
     await client.query("BEGIN");
@@ -123,13 +130,17 @@ export async function redeemClosureConfirmation(
       await client.query("ROLLBACK");
       return { ok: false };
     }
-    await client.query("COMMIT");
 
-    // Immediate access + work block via the state machine (revokes sessions).
+    // Immediate access + work block via the state machine (revokes sessions),
+    // inside the same transaction via the outer-client join.
     const result = await closeAccount(db, link.rows[0].account_id, link.rows[0].account_id, now, {
       reason: "owner_confirmed_closure_via_fresh_link"
-    });
-    if (!result.ok) return { ok: false };
+    }, client);
+    if (!result.ok) {
+      await client.query("ROLLBACK");
+      return { ok: false };
+    }
+    await client.query("COMMIT");
     return { ok: true };
   } catch (err) {
     await client.query("ROLLBACK").catch(() => undefined);

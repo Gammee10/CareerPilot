@@ -1,6 +1,6 @@
 // Authenticated sessions (ADR-027): bounded absolute/idle lifetimes by role,
 // immediate revocation on suspension/closure/admin-authority removal.
-import type { Pool } from "pg";
+import type { Pool, PoolClient } from "pg";
 import { recordAudit } from "./audit.js";
 import { generateToken, hashToken } from "./tokens.js";
 import { config } from "../config.js";
@@ -29,7 +29,7 @@ function lifetimesFor(role: SessionRole, override?: SessionLifetimes): SessionLi
 }
 
 export async function createSession(
-  db: Pool,
+  db: Pool | PoolClient,
   accountId: string,
   role: SessionRole,
   now: Date,

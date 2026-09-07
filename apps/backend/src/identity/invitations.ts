@@ -2,6 +2,7 @@
 import type { Pool, PoolClient } from "pg";
 import { recordAudit } from "./audit.js";
 import { generateToken, hashToken } from "./tokens.js";
+import { createSession } from "./sessions.js";
 import { config } from "../config.js";
 
 export type InvitationRow = {
@@ -135,7 +136,7 @@ export async function expireStaleInvitations(
 }
 
 export type AcceptResult =
-  | { ok: true; accountId: string }
+  | { ok: true; accountId: string; sessionToken: string }
   | // Non-disclosing: callers collapse every failure into one generic response.
   { ok: false; reason: "invalid_token" | "not_active_state" };
 
@@ -144,6 +145,10 @@ export async function acceptInvitation(
   token: string,
   now: Date
 ): Promise<AcceptResult> {
+  // Atomic accept + first session (H3): a crash between account activation
+  // and session issue must not strand an accepted invitation with no session.
+  // The session joins the accept transaction; failure rolls back so the
+  // invitation stays redeemable.
   const client = await db.connect();
   try {
     await client.query("BEGIN");
@@ -163,8 +168,8 @@ export async function acceptInvitation(
     // Idempotent account creation: an existing active account for this email
     // simply signs in again (re-issued/expired-then-reaccepted path).
     let accountId: string;
-    const acct = await client.query<{ id: string; state: string }>(
-      "SELECT id, state FROM accounts WHERE email = $1 FOR UPDATE",
+    const acct = await client.query<{ id: string; state: string; is_admin: boolean }>(
+      "SELECT id, state, is_admin FROM accounts WHERE email = $1 FOR UPDATE",
       [row.email]
     );
     if (acct.rows[0]) {
@@ -201,8 +206,13 @@ export async function acceptInvitation(
       targetCategory: "invitation",
       targetId: row.id
     });
+    // Role derives server-side from accounts.is_admin (never request input).
+    const isAdmin = acct.rows[0]?.is_admin === true;
+    // Re-read for newly created accounts (is_admin defaults false).
+    const role = isAdmin ? "admin" : "user";
+    const session = await createSession(client, accountId, role, now);
     await client.query("COMMIT");
-    return { ok: true, accountId };
+    return { ok: true, accountId, sessionToken: session.token };
   } catch (err) {
     await client.query("ROLLBACK").catch(() => undefined);
     throw err;

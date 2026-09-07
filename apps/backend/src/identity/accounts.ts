@@ -1,5 +1,5 @@
 // Account state machine (ADR-025): active <-> suspended; closed is terminal.
-import type { Pool } from "pg";
+import type { Pool, PoolClient } from "pg";
 import { recordAudit } from "./audit.js";
 
 export type AccountRow = {
@@ -46,21 +46,26 @@ async function setState(
   actorAccountId: string,
   action: string,
   now: Date,
-  extraDetails?: Record<string, unknown>
+  extraDetails?: Record<string, unknown>,
+  // Join an existing transaction (H3 atomic redemption) instead of opening
+  // one. The caller owns COMMIT/ROLLBACK; failure audits still persist via
+  // the pool outside the caller's transaction.
+  outer?: PoolClient
 ): Promise<StateChangeResult> {
-  const client = await db.connect();
+  const client = outer ?? (await db.connect());
+  const owned = outer === undefined;
   try {
-    await client.query("BEGIN");
+    if (owned) await client.query("BEGIN");
     const { rows } = await client.query<{ state: AccountRow["state"] }>(
       "SELECT state FROM accounts WHERE id = $1 FOR UPDATE",
       [accountId]
     );
     if (rows.length === 0) {
-      await client.query("ROLLBACK");
+      if (owned) await client.query("ROLLBACK");
       return { ok: false, reason: "not_found" };
     }
     if (!allowedFrom.includes(rows[0].state)) {
-      await client.query("ROLLBACK");
+      if (owned) await client.query("ROLLBACK");
       // Failure evidence must persist — recorded outside the aborted transaction.
       await recordAudit(db, {
         actorType: "admin",
@@ -104,13 +109,13 @@ async function setState(
       targetId: accountId,
       details: { to: next, ...extraDetails }
     });
-    await client.query("COMMIT");
+    if (owned) await client.query("COMMIT");
     return { ok: true, account: updated.rows[0] };
   } catch (err) {
-    await client.query("ROLLBACK").catch(() => undefined);
+    if (owned) await client.query("ROLLBACK").catch(() => undefined);
     throw err;
   } finally {
-    client.release();
+    if (owned) client.release();
   }
 }
 
@@ -141,8 +146,9 @@ export function closeAccount(
   accountId: string,
   actorAccountId: string,
   now: Date,
-  details?: Record<string, unknown>
+  details?: Record<string, unknown>,
+  outer?: PoolClient
 ) {
   return setState(db, accountId, "closed", ["active", "suspended"], actorAccountId,
-    "account.closed", now, details);
+    "account.closed", now, details, outer);
 }
