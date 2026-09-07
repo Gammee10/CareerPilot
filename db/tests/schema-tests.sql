@@ -269,4 +269,42 @@ BEGIN
 EXCEPTION WHEN unique_violation THEN NULL;
 END $$;
 
+-- ---------------------------------------------------------------------------
+-- 8. H15 operational indexes + dead superseded column removal
+-- ---------------------------------------------------------------------------
+
+DO $$
+DECLARE n integer;
+BEGIN
+  SELECT count(*) INTO n FROM pg_indexes
+   WHERE schemaname = 'public' AND indexname IN (
+     'source_collection_attempts_run_idx',
+     'source_listing_observations_latest_idx',
+     'source_listing_observations_run_idx',
+     'source_listing_observations_observed_idx',
+     'evaluations_profile_version_idx',
+     'evaluations_input_observation_idx',
+     'audit_events_action_idx',
+     'audit_events_actor_idx',
+     'audit_events_correlation_idx',
+     'signin_links_expires_idx',
+     'resume_documents_grace_idx',
+     'availability_history_recorded_idx',
+     'exceptional_access_requested_idx'
+   );
+  IF n <> 13 THEN RAISE EXCEPTION 'FAIL: expected 13 H15 indexes, found %', n; END IF;
+END $$;
+
+-- The dead evaluations.superseded flag is gone; supersession is derived
+-- (append-only rows could never flip it).
+DO $$
+BEGIN
+  PERFORM 1 FROM evaluations LIMIT 0;
+  IF EXISTS (
+    SELECT 1 FROM information_schema.columns
+     WHERE table_schema = 'public' AND table_name = 'evaluations'
+       AND column_name = 'superseded'
+  ) THEN RAISE EXCEPTION 'FAIL: evaluations.superseded still exists'; END IF;
+END $$;
+
 \echo 'ALL SCHEMA TESTS PASSED'

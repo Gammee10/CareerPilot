@@ -613,6 +613,16 @@ Most important areas requiring attention:
   decide superseded fate against ADR-005/037 and record in tasks.
 - **Suggested validation:** `EXPLAIN` on hot queries before/after; schema tests for
   sweep-role restriction and supersession derivation.
+- **Status: Completed 2026-09-07** — migration `0008_perf_indexes.sql` adds all
+  13 missing indexes (attempts, observations latest/run/observed, evaluation
+  inputs, audit action/actor/correlation, signin expiry, resume grace,
+  history/exceptional-access sweeps; verified by a schema-test count) and
+  drops the dead `evaluations.superseded` column (supersession stays derived
+  per ADR-005/037; the two `superseded = false` predicates removed as
+  no-ops). Sweep-role separation explicitly deferred with rationale in the
+  migration header (single app DB role — separation would be theater without
+  a second principal). Validated: `test-schema.ps1` ALL PASSED + full vitest
+  suite green.
 
 ### H16. Unbounded reevaluation + ignored source scoping (DoS-by-profile-change)
 

@@ -107,7 +107,7 @@ export async function listJobsForDashboard(
             input_observation_id
        FROM evaluations
       WHERE account_id = $1 AND canonical_job_id = ANY($2)
-        AND superseded = false AND outcome = 'succeeded'
+        AND outcome = 'succeeded'
       ORDER BY canonical_job_id, created_at DESC`,
     [accountId, jobIds]
   );

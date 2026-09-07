@@ -346,8 +346,8 @@ describe("T6.4 — evaluation snapshots & compatible-current selection", () => {
     // The superseded snapshot remains fully attributable to its own inputs
     // (append-only row, never mutated). Supersession is derived: a newer
     // snapshot exists for the same job.
-    const old = await db.query<{ superseded: boolean; profile_version_id: string; score: number | null }>(
-      "SELECT superseded, profile_version_id, score FROM evaluations WHERE id = $1",
+    const old = await db.query<{ profile_version_id: string; score: number | null }>(
+      "SELECT profile_version_id, score FROM evaluations WHERE id = $1",
       [snap1]
     );
     expect(old.rows[0].profile_version_id).toBe(pv1.rows[0].id);

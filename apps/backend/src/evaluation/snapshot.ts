@@ -103,7 +103,7 @@ export async function getCurrentCompatibleEvaluation(
     `SELECT id, score, eligibility, matching_policy_version, profile_version_id, input_observation_id, created_at
        FROM evaluations
       WHERE account_id = $1 AND canonical_job_id = $2
-        AND superseded = false AND outcome = 'succeeded'
+        AND outcome = 'succeeded'
       ORDER BY created_at DESC LIMIT 1`,
     [accountId, canonicalJobId]
   );
