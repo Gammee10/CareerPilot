@@ -4,6 +4,18 @@ Newest entries first. Append-only — never delete or rewrite prior entries.
 
 ---
 
+## 2026-09-07 - Comprehensive codebase improvement audit (no code changes)
+
+**Done:** Deep review of backend, frontend, AI service, DB migrations, ops/scripts, Caddy, secrets, CI, and tests. Delivered `CODEBASE_IMPROVEMENTS.md` with 51 findings (8 Critical, 16 High, 14 Medium, 8 Low, 5 Optional), each with location, problem, fix, implementation guidance, and validation. Top themes: dead admin-session role, open AI `/extract`, LoggingMailer wired in prod, extraction/job-detail IDOR gaps, collection pacing no-op, resume-retention writer missing, plus hardening/perf/ops follow-ups.
+
+**Verified:** Spot-checked `app.ts`, `middleware/auth.ts`, `services/ai/main.py`, `dashboard/page.tsx`, `ci.yml` to ground top findings; subagent sweeps covered remaining files line-level. No app code modified, so no test re-run required.
+
+**Deviations surfaced:** none architectural (review-only session).
+
+**Next step:** Work the report's Recommended Implementation Order starting with access-control + prod-blockers (C1–C5, H1–H2); re-run affected ADR-030 gate rows per change.
+
+---
+
 ## 2026-08-24 - ADR-030 gate APPROVED; MVP complete through release-validation
 
 **Done:** Recorded decision-maker approval in docs/gate/sign-off.md (status APPROVED, 2026-08-24 UTC). All nine phases complete: foundation, identity, profile/resume processing, source adapters + shared pipeline, discovery/background work, hybrid evaluation, dashboard, operations, and the release-validation gate.

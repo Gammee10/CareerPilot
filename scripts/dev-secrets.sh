@@ -8,7 +8,7 @@ mkdir -p "$DIR"
 
 gen_hex() { openssl rand -hex 32; }
 
-for name in postgres_password session_signing_key resend_api_key gemini_api_key; do
+for name in postgres_password session_signing_key resend_api_key gemini_api_key ai_internal_token; do
   gen_hex > "$DIR/$name.txt"
 done
 

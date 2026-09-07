@@ -18,7 +18,7 @@ function New-HexSecret {
   }
 }
 
-foreach ($name in @("postgres_password", "session_signing_key", "resend_api_key", "gemini_api_key")) {
+foreach ($name in @("postgres_password", "session_signing_key", "resend_api_key", "gemini_api_key", "ai_internal_token")) {
   Set-Content -LiteralPath (Join-Path $dir "$name.txt") -Value (New-HexSecret) -NoNewline -Encoding ascii
 }
 

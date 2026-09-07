@@ -27,7 +27,7 @@ OUT="$ROOT/secrets/prod"
 mkdir -p "$OUT"
 chmod 700 "$OUT"
 
-SECRET_NAMES=(postgres_password session_signing_key resend_api_key gemini_api_key)
+SECRET_NAMES=(postgres_password session_signing_key resend_api_key gemini_api_key ai_internal_token)
 
 for name in "${SECRET_NAMES[@]}"; do
   base64_secret="$(oci secrets secret-bundle get \

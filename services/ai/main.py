@@ -1,10 +1,13 @@
+import hashlib
+import hmac
 import json
 import logging
 import os
 import urllib.error
 import urllib.request
 
-from fastapi import FastAPI, HTTPException
+from fastapi import Depends, FastAPI, HTTPException
+from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 from pydantic import BaseModel, Field
 
 LOG_LEVEL = os.getenv("LOG_LEVEL", "info").upper()
@@ -12,6 +15,9 @@ logging.basicConfig(level=LOG_LEVEL)
 
 GEMINI_API_KEY_FILE = "/run/secrets/gemini_api_key"
 GEMINI_MODEL = os.getenv("GEMINI_MODEL", "gemini-2.0-flash")
+AI_INTERNAL_TOKEN_FILE = os.getenv("AI_INTERNAL_TOKEN_FILE", "/run/secrets/ai_internal_token")
+
+bearer_scheme = HTTPBearer(auto_error=False)
 
 app = FastAPI(title="careerpilot-ai", docs_url=None, redoc_url=None, openapi_url=None)
 
@@ -24,7 +30,30 @@ def healthz() -> dict:
 class ExtractionRequest(BaseModel):
     # The Node-owned path sends ONLY the already-minimized task payload.
     task: str = Field(pattern="^resume_extraction$")
-    content: str
+    content: str = Field(max_length=50000)
+
+
+def _internal_token() -> str | None:
+    try:
+        with open(AI_INTERNAL_TOKEN_FILE, encoding="utf-8") as f:
+            return f.read().strip() or None
+    except OSError:
+        return None
+
+
+def require_internal_caller(
+    creds: HTTPAuthorizationCredentials | None = Depends(bearer_scheme),
+) -> None:
+    expected = _internal_token()
+    if not expected or not creds or not creds.credentials:
+        raise HTTPException(status_code=401, detail="unauthorized")
+    if not hmac.compare_digest(creds.credentials, expected):
+        raise HTTPException(status_code=401, detail="unauthorized")
+    # Defense in depth: hash prefix only, never the token (ADR-015).
+    logging.debug(
+        "ai_caller_authorized hash_prefix=%s",
+        hashlib.sha256(expected.encode()).hexdigest()[:8],
+    )
 
 
 def _gemini_api_key() -> str | None:
@@ -80,6 +109,6 @@ def _call_gemini(content: str) -> dict:
 
 
 @app.post("/extract")
-def extract(req: ExtractionRequest) -> dict:
+def extract(req: ExtractionRequest, _auth: None = Depends(require_internal_caller)) -> dict:
     # The response is an untrusted proposal; validation happens Node-side.
     return {"proposal": _call_gemini(req.content)}

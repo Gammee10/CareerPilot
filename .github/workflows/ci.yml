@@ -59,9 +59,11 @@ jobs:
           cache: pip
           cache-dependency-path: services/ai/requirements.txt
       - name: Install dependencies
-        run: pip install -r services/ai/requirements.txt ruff
+        run: pip install -r services/ai/requirements.txt ruff pytest httpx
       - name: Lint
         run: ruff check services/ai
+      - name: Tests (extract caller auth)
+        run: python -m pytest services/ai -q
       - name: Byte-compile + import smoke test
         run: |
           python -m compileall services/ai/main.py
