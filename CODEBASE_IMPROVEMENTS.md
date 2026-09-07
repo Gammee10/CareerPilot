@@ -397,6 +397,16 @@ Most important areas requiring attention:
   `?limit=&cursor=` params with a conservative default (e.g., 50).
 - **Suggested validation:** Load test with 500-job fixture asserting bounded query
   count (e.g., via pg query counter) and p95 < threshold.
+- **Status: Completed 2026-09-07** — list rewritten to ~8 batched roundtrips
+  (candidates, availability, profile, latest-observations, evaluations,
+  listing facts + deterministic fallback) with identical ranking/filter/
+  pending semantics, plus `limit` (default 50, max 200) / `offset` pagination
+  in a `{jobs, total, limit, offset}` envelope (malformed values fall back to
+  defaults, never 500). Drive-by fix: pg `numeric` scores are now serialized
+  as JSON numbers, matching the frontend's `score: number | null` contract
+  (was strings at runtime). Test: 12-job fixture pages 5/5/2 with disjoint ids
+  and intact titles/eligibility. A 500-job load soak remains future work for
+  the VM.
 
 ### H7. `loadJobView` selection disagrees with snapshot selection (dashboard stuck pending)
 

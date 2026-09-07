@@ -384,8 +384,14 @@ export function buildApp(deps: AppDeps): Express {
     requireSession(db, nowFn),
     requireSelf("accountId"),
     async (req, res) => {
-      const jobs = await listJobsForDashboard(db, req.auth!.accountId);
-      res.json({ jobs });
+      // H6: cursor-free pagination (limit/offset, conservative defaults).
+      const limit = Number(req.query.limit ?? NaN);
+      const offset = Number(req.query.offset ?? NaN);
+      const page = await listJobsForDashboard(db, req.auth!.accountId, {
+        ...(Number.isFinite(limit) ? { limit } : {}),
+        ...(Number.isFinite(offset) ? { offset } : {})
+      });
+      res.json(page);
     }
   );
 

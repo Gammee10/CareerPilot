@@ -446,8 +446,7 @@ describe("T7.6 â€” search strategy controls", () => {
     });
   });
 
-  it("M4: partial update preserves targeting; oversized/unknown payloads are 400", async () => {
-    const user = await signIn("strategy2@example.invalid");
+  it("M4: partial update preserves targeting; oversized/unknown payloads are 400", async () => {    const user = await signIn("strategy2@example.invalid");
     await withServer(h.app, async (port) => {
       const path = `/api/account/${user.accountId}/search-strategy`;
       // Seed targeting + disabled sources with a full update.
@@ -498,6 +497,55 @@ describe("T7.6 â€” search strategy controls", () => {
       };
       expect(afterBody.sourceTargeting).toEqual({ companies: ["acme"] });
       expect(afterBody.disabledSources).toEqual(["remoteok"]);
+    });
+  });
+
+  it("H6: job list is paginated with a bounded envelope", async () => {
+    const user = await signIn("paged@example.invalid");
+    for (let i = 0; i < 12; i++) {
+      await seedEvaluatedJob(user.accountId);
+    }
+    await withServer(h.app, async (port) => {
+      const base = `/api/account/${user.accountId}/jobs`;
+      const p1 = await request(port, "GET", `${base}?limit=5&offset=0`, {
+        cookie: user.cookie
+      });
+      expect(p1.status).toBe(200);
+      const b1 = p1.body as {
+        jobs: Array<Record<string, unknown>>;
+        total: number;
+        limit: number;
+        offset: number;
+      };
+      expect(b1.jobs).toHaveLength(5);
+      expect(b1.total).toBe(12);
+      expect(b1.limit).toBe(5);
+      expect(b1.offset).toBe(0);
+      // Batched facts path still resolves titles + eligibility per item.
+      for (const job of b1.jobs) {
+        expect(job.title).toBe("Backend Engineer");
+        expect(job.eligibility).toBe("confirmed");
+        expect(job.pendingReevaluation).toBe(false);
+      }
+      const p2 = await request(port, "GET", `${base}?limit=5&offset=5`, {
+        cookie: user.cookie
+      });
+      expect((p2.body as { jobs: unknown[] }).jobs).toHaveLength(5);
+      const p3 = await request(port, "GET", `${base}?limit=5&offset=10`, {
+        cookie: user.cookie
+      });
+      expect((p3.body as { jobs: unknown[] }).jobs).toHaveLength(2);
+      // No overlap between pages.
+      const ids = (b: unknown) =>
+        ((b as { jobs: Array<{ canonicalJobId: string }> }).jobs).map((j) => j.canonicalJobId);
+      const all = [...ids(p1.body), ...ids(p2.body), ...ids(p3.body)];
+      expect(new Set(all).size).toBe(12);
+      // Malformed pagination falls back to defaults, never 500.
+      const bad = await request(port, "GET", `${base}?limit=bogus&offset=-3`, {
+        cookie: user.cookie
+      });
+      expect(bad.status).toBe(200);
+      expect((bad.body as { total: number }).total).toBe(12);
     });
   });
 });
