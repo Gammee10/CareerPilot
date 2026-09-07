@@ -75,6 +75,9 @@ Most important areas requiring attention:
 - **Suggested validation:** New vitest integration test over the HTTP surface
   (`POST /api/admin/*` with admin vs non-admin cookies); existing 48 identity tests
   must still pass.
+- **Status: Completed 2026-09-07** — both redeem paths derive `role` server-side
+  from `accounts.is_admin`; test covers admin redeem → 200 on `/api/admin/*`
+  and non-admin redeem → 403.
 
 ### C2. AI `/extract` endpoint has zero caller authentication (open Gemini proxy)
 

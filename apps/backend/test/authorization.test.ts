@@ -150,6 +150,32 @@ describe("deny-by-default isolation", () => {
     });
   });
 
+  it("admin link redeem issues an admin session; non-admin redeem does not (C1)", async () => {
+    await withServer(h.app, async (port) => {
+      const users = await setupUsers(port);
+      const { requestSignInLink, confirmSignInLink } = await import(
+        "../src/identity/signinLinks.js"
+      );
+      // Admin redeems a sign-in link → admin surface allowed.
+      const adminLink = await requestSignInLink(h.db, "admin@example.invalid", t0);
+      if (!adminLink.ok) throw Error("setup");
+      await confirmSignInLink(h.db, adminLink.token, t0);
+      const adminRedeem = await request(port, "POST", "/api/auth/signin-link/redeem", {
+        body: { token: adminLink.token }
+      });
+      expect(adminRedeem.status).toBe(200);
+      const adminList = await request(port, "GET", "/api/admin/invitations", {
+        cookie: sessionCookie(adminRedeem)
+      });
+      expect(adminList.status).toBe(200);
+      // Non-admin redeem → admin surface still forbidden.
+      const userList = await request(port, "GET", "/api/admin/invitations", {
+        cookie: users.userACookie
+      });
+      expect(userList.status).toBe(403);
+    });
+  });
+
   it("revoked sessions fail closed immediately", async () => {
     await withServer(h.app, async (port) => {
       const users = await setupUsers(port);
