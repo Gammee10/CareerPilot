@@ -16,6 +16,9 @@ import { Pool } from "pg";
 const db = new Pool({ ...testDbConfig(), database: TEST_DB });
 const t0 = new Date("2026-08-23T12:00:00Z");
 const now = () => new Date(t0.getTime() + 60_000);
+// Explicit no-op pacing sleep (C6): production uses a real timer via the
+// CollectionDeps default; the suite must not wait on rate-limit pacing.
+const noSleep = async () => undefined;
 
 beforeEach(async () => {
   await resetDb(db);
@@ -69,7 +72,7 @@ describe("collection work unit", () => {
     await db.query("UPDATE job_sources SET terms_validation_recorded_at = now() WHERE slug='greenhouse'");
 
     const result = await runCollectionJob(
-      { db, transport: okTransport(GREENHOUSE_PAGE), now },
+      { db, transport: okTransport(GREENHOUSE_PAGE), now, sleep: noSleep },
       { runId, sourceSlug: "greenhouse", config: { boardToken: "acme" } }
     );
     expect(result).toMatchObject({ outcome: "succeeded", observationCount: 1 });
@@ -91,7 +94,7 @@ describe("collection work unit", () => {
 
     // First delivery processes the job fully.
     const first = await runCollectionJob(
-      { db, transport: okTransport(GREENHOUSE_PAGE), now },
+      { db, transport: okTransport(GREENHOUSE_PAGE), now, sleep: noSleep },
       { runId, sourceSlug: "greenhouse", config: { boardToken: "acme" } }
     );
     expect(first.outcome).toBe("succeeded");
@@ -99,7 +102,7 @@ describe("collection work unit", () => {
     // Simulated re-delivery after crash-before-ack: short-circuits on the
     // idempotency identity — no duplicate observations or attempts.
     const second = await runCollectionJob(
-      { db, transport: okTransport(GREENHOUSE_PAGE), now },
+      { db, transport: okTransport(GREENHOUSE_PAGE), now, sleep: noSleep },
       { runId, sourceSlug: "greenhouse", config: { boardToken: "acme" } }
     );
     expect(second.outcome).toBe("succeeded");
@@ -127,7 +130,7 @@ describe("collection work unit", () => {
     };
 
     const result = await runCollectionJob(
-      { db, transport, now },
+      { db, transport, now, sleep: noSleep },
       { runId, sourceSlug: "greenhouse", config: { boardToken: "acme" } }
     );
 
@@ -151,7 +154,7 @@ describe("collection work unit", () => {
 
     // Greenhouse succeeds.
     await runCollectionJob(
-      { db, transport: okTransport(GREENHOUSE_PAGE), now },
+      { db, transport: okTransport(GREENHOUSE_PAGE), now, sleep: noSleep },
       { runId, sourceSlug: "greenhouse", config: { boardToken: "acme" } }
     );
     // Lever fails non-transiently.
@@ -161,7 +164,7 @@ describe("collection work unit", () => {
       return { status: 404, headers: {}, body: "" };
     };
     await runCollectionJob(
-      { db, transport: leverFailing, now },
+      { db, transport: leverFailing, now, sleep: noSleep },
       { runId, sourceSlug: "lever", config: { site: "acme" } }
     );
     expect(leverCalls).toBe(1); // no retries for non-transient
@@ -194,7 +197,7 @@ describe("collection work unit", () => {
     await suspendAccount(db, user, adminId.rows[0].id, t0);
 
     const result = await runCollectionJob(
-      { db, transport: okTransport(GREENHOUSE_PAGE), now },
+      { db, transport: okTransport(GREENHOUSE_PAGE), now, sleep: noSleep },
       { runId, sourceSlug: "greenhouse", config: { boardToken: "acme" } }
     );
     expect(result).toEqual({ outcome: "deferred", observationCount: 0 });
@@ -215,7 +218,7 @@ describe("collection work unit", () => {
     );
 
     await runCollectionJob(
-      { db, transport: okTransport(GREENHOUSE_PAGE), now },
+      { db, transport: okTransport(GREENHOUSE_PAGE), now, sleep: noSleep },
       { runId, sourceSlug: "greenhouse", config: { boardToken: "acme" } }
     );
     let status = await db.query<{ status: string }>(
@@ -226,7 +229,7 @@ describe("collection work unit", () => {
 
     const failing: Transport = async () => ({ status: 404, headers: {}, body: "" });
     await runCollectionJob(
-      { db, transport: failing, now },
+      { db, transport: failing, now, sleep: noSleep },
       { runId, sourceSlug: "lever", config: { site: "acme" } }
     );
     status = await db.query<{ status: string }>(
@@ -247,13 +250,66 @@ describe("collection work unit", () => {
       return { status: 500, headers: {}, body: "" };
     };
     const result = await runCollectionJob(
-      { db, transport: counting, now },
+      { db, transport: counting, now, sleep: noSleep },
       { runId, sourceSlug: "lever", config: { site: "x" } }
     );
     expect(result.outcome).toBe("failed_non_transient");
     expect(calls).toBe(0);
     // restore
     await db.query("UPDATE job_sources SET enabled = true WHERE slug='lever'");
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Pacing (C6): the ADR-059 ~1 req/s interval actually delays sequential calls.
+// ---------------------------------------------------------------------------
+describe("collection pacing", () => {
+  it("spaces sequential source calls by the configured interval", async () => {
+    const { PoliteClient } = await import("../src/sources/politeClient.js");
+    let t = 1_000_000;
+    const slept: number[] = [];
+    const sleep = async (ms: number) => {
+      slept.push(ms);
+      t += ms;
+    };
+    let calls = 0;
+    const client = new PoliteClient(
+      async () => {
+        calls += 1;
+        return { status: 200, headers: {}, body: "[]" };
+      },
+      sleep,
+      () => t,
+      { minIntervalMs: 1000, maxAttempts: 3 }
+    );
+    await client.getJson("https://example.invalid/a");
+    await client.getJson("https://example.invalid/b");
+    expect(calls).toBe(2);
+    expect(slept).toEqual([1000]);
+  });
+
+  it("honors Retry-After through the injected sleep", async () => {
+    const { PoliteClient } = await import("../src/sources/politeClient.js");
+    let t = 2_000_000;
+    const slept: number[] = [];
+    const sleep = async (ms: number) => {
+      slept.push(ms);
+      t += ms;
+    };
+    let calls = 0;
+    const client = new PoliteClient(
+      async () => {
+        calls += 1;
+        if (calls === 1) return { status: 429, headers: { "retry-after": "2" }, body: "" };
+        return { status: 200, headers: {}, body: "[]" };
+      },
+      sleep,
+      () => t,
+      { minIntervalMs: 1000, maxAttempts: 3 }
+    );
+    await client.getJson("https://example.invalid/c");
+    expect(calls).toBe(2);
+    expect(slept).toContain(2000);
   });
 });
 

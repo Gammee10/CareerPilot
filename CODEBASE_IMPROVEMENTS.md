@@ -193,6 +193,10 @@ Most important areas requiring attention:
   3. Confirm `Retry-After` path (politeClient) actually awaits the injected sleep.
 - **Suggested validation:** Unit test on spacing; manual log-timing check on a real
   collection run.
+- **Status: Completed 2026-09-07** — `CollectionDeps.sleep` defaults to a real
+  `setTimeout` timer (production pacing actually waits); tests inject an
+  explicit no-op; new fake-clock tests assert sequential calls are spaced by
+  the interval and `Retry-After` is honored through the injected sleep.
 
 ### C7. Resume-grace retention never fires; artifact bytes never swept (ADR-020 gap)
 

@@ -1,7 +1,7 @@
 ﻿// Source-collection work unit (T5.1/T5.5/T5.6): one job = one source within
 // one discovery run. Idempotent identity: collection:{runId}:{sourceSlug}.
 import type { Pool } from "pg";
-import { PoliteClient, NonTransientError, AttemptsExhaustedError, type Transport } from "../sources/politeClient.js";
+import { PoliteClient, NonTransientError, AttemptsExhaustedError, type Sleep, type Transport } from "../sources/politeClient.js";
 import { buildAdapter } from "../sources/registry.js";
 import { checkCollectionAllowed } from "../sources/registry.js";
 import type { SourceSlug } from "../sources/contract.js";
@@ -19,8 +19,14 @@ export type CollectionDeps = {
   db: Pool;
   /** Injectable transport for deterministic tests; real fetch when omitted. */
   transport?: Transport;
+  /** Pacing sleep. Production uses a real timer; tests inject a no-op/fake. */
+  sleep?: Sleep;
   now?: () => Date;
 };
+
+function realSleep(ms: number): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
 
 type AttemptStatus =
   | "in_progress"
@@ -114,9 +120,11 @@ export async function runCollectionJob(
   );
 
   const transport = deps.transport ?? defaultTransport();
+  // ADR-059 ~1 req/s pacing actually waits in production (C6). Tests inject
+  // an explicit no-op/fake sleep via deps so the suite stays fast.
   const client = new PoliteClient(
     transport,
-    async () => undefined, // real sleeping is delegated to pg-boss retry delays
+    deps.sleep ?? realSleep,
     () => now().getTime(),
     { minIntervalMs: 1000, maxAttempts: 3 }
   );
