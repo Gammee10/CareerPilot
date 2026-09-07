@@ -161,6 +161,15 @@ describe("issuance limits (ADR-026)", () => {
     const recovered = await requestSignInLink(h.db, "user@example.invalid", nextDay);
     expect(recovered.ok).toBe(true);
   });
+
+  it("M2: parallel issuance respects the 3-per-15min limit", async () => {
+    await setupUser();
+    const results = await Promise.all(
+      Array.from({ length: 5 }, () => requestSignInLink(h.db, "user@example.invalid", t0))
+    );
+    expect(results.filter((r) => r.ok).length).toBe(3);
+    expect(results.filter((r) => !r.ok).length).toBe(2);
+  });
 });
 
 describe("HTTP surface non-disclosure", () => {

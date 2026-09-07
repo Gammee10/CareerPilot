@@ -44,32 +44,38 @@ export async function requestSignInLink(
     return { ok: false, reason: "suppressed" };
   }
 
-  const recent15 = await db.query<{ n: string }>(
-    `SELECT count(*)::text AS n FROM signin_links
-      WHERE email = $1 AND issued_at > $2`,
-    [email, new Date(now.getTime() - 15 * MINUTE_MS)]
-  );
-  const recent24 = await db.query<{ n: string }>(
-    `SELECT count(*)::text AS n FROM signin_links
-      WHERE email = $1 AND issued_at > $2`,
-    [email, new Date(now.getTime() - 24 * HOUR_MS)]
-  );
-  const max15 = policy?.maxPer15Min ?? config.identity.signinLinkMaxPer15Min;
-  const max24 = policy?.maxPer24H ?? config.identity.signinLinkMaxPer24H;
-  if (Number(recent15.rows[0].n) >= max15 || Number(recent24.rows[0].n) >= max24) {
-    await recordAudit(db, {
-      actorType: "system",
-      action: "signin_link.requested",
-      outcome: "denied",
-      targetCategory: "signin_link",
-      details: { reason: "rate_limited" }
-    });
-    return { ok: false, reason: "suppressed" };
-  }
-
   const client = await db.connect();
   try {
     await client.query("BEGIN");
+    // M2: serialize per-email issuance so concurrent requests cannot both
+    // read counts below the 3/15min + 10/24h limits and both insert (matches
+    // discovery/orchestrator.ts per-account locking).
+    await client.query("SELECT pg_advisory_xact_lock(hashtext($1))", [
+      `signin-limit:${email}`
+    ]);
+    const recent15 = await client.query<{ n: string }>(
+      `SELECT count(*)::text AS n FROM signin_links
+        WHERE email = $1 AND issued_at > $2`,
+      [email, new Date(now.getTime() - 15 * MINUTE_MS)]
+    );
+    const recent24 = await client.query<{ n: string }>(
+      `SELECT count(*)::text AS n FROM signin_links
+        WHERE email = $1 AND issued_at > $2`,
+      [email, new Date(now.getTime() - 24 * HOUR_MS)]
+    );
+    const max15 = policy?.maxPer15Min ?? config.identity.signinLinkMaxPer15Min;
+    const max24 = policy?.maxPer24H ?? config.identity.signinLinkMaxPer24H;
+    if (Number(recent15.rows[0].n) >= max15 || Number(recent24.rows[0].n) >= max24) {
+      await client.query("ROLLBACK");
+      await recordAudit(db, {
+        actorType: "system",
+        action: "signin_link.requested",
+        outcome: "denied",
+        targetCategory: "signin_link",
+        details: { reason: "rate_limited" }
+      });
+      return { ok: false, reason: "suppressed" };
+    }
     // Issuing a new link invalidates the prior unused link (ADR-018).
     await client.query(
       `UPDATE signin_links SET invalidated_at = $2

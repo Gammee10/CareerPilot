@@ -59,6 +59,10 @@ export async function runExtraction(
   }
   const idempotencyKey = `extraction:${resumeDocumentId}:${taskContentHash(task)}`;
 
+  // Fast-path reuse: the idempotency key already binds (document, content
+  // hash), so a hit here is for identical content — never a stale draft for
+  // changed content (H4). The authoritative re-check happens inside the
+  // insert transaction below under an advisory lock.
   const existing = await db.query(
     "SELECT idempotency_key FROM idempotency_records WHERE idempotency_key = $1",
     [idempotencyKey]
@@ -107,6 +111,27 @@ export async function runExtraction(
   const client = await db.connect();
   try {
     await client.query("BEGIN");
+    // H4: serialize concurrent duplicate extractions on the idempotency key
+    // so only one AI-paid result persists; the loser reuses the winner.
+    await client.query("SELECT pg_advisory_xact_lock(hashtext($1))", [idempotencyKey]);
+    const recheck = await client.query<{ outcome: unknown }>(
+      "SELECT outcome FROM idempotency_records WHERE idempotency_key = $1",
+      [idempotencyKey]
+    );
+    if (recheck.rows.length > 0) {
+      const priorDraft = await client.query<{ id: string }>(
+        `SELECT id FROM resume_extraction_drafts
+          WHERE resume_document_id = $1 AND status <> 'discarded'
+          ORDER BY created_at DESC LIMIT 1`,
+        [resumeDocumentId]
+      );
+      if (priorDraft.rows.length > 0) {
+        await client.query("COMMIT");
+        return { ok: true, draftId: priorDraft.rows[0].id, reusedExisting: true };
+      }
+      // Idempotency row without a live draft (e.g. draft discarded after a
+      // prior success): fall through and create a fresh draft below.
+    }
     const draft = await client.query<{ id: string }>(
       `INSERT INTO resume_extraction_drafts
          (account_id, resume_document_id, proposed_content, status)
@@ -115,7 +140,8 @@ export async function runExtraction(
     );
     await client.query(
       `INSERT INTO idempotency_records (idempotency_key, work_type, outcome)
-       VALUES ($1, 'resume_extraction', $2)`,
+       VALUES ($1, 'resume_extraction', $2)
+       ON CONFLICT (idempotency_key) DO NOTHING`,
       [idempotencyKey, JSON.stringify({ draftId: draft.rows[0].id })]
     );
     await recordAudit(client, {

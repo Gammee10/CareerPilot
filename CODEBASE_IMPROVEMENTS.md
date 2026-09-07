@@ -347,6 +347,16 @@ Most important areas requiring attention:
      `ON CONFLICT DO UPDATE/NOTHING`.
 - **Suggested validation:** Concurrency tests (parallel duplicate calls → exactly one
   AI call / one version / one canonical row).
+- **Status: Completed 2026-09-07** — advisory-lock serialization + hardened
+  writes: extraction re-checks idempotency under `pg_advisory_xact_lock` with
+  `ON CONFLICT DO NOTHING` (one draft per logical input; reuse key already
+  binds doc+hash so changed content never hits stale drafts); profile saves
+  lock per account with unique-violation retry; canonicalization locks per
+  match key (no unique constraint, preserving ambiguous→separate semantics);
+  accept/edit/discard use conditional updates + draft locks. Deliberate
+  deviation: parallel duplicates may still double-pay one provider call (AI
+  runs before the DB lock) — the guarantee is a single persisted outcome, and
+  the test asserts one draft, not one AI call.
 
 ### H5. `targeted_sources` never populated — run auto-complete is dead code
 
@@ -619,6 +629,9 @@ Most important areas requiring attention:
   count + insert, matching `discovery/orchestrator.ts:101`.
 - **Suggested validation:** Concurrency test with parallel requests asserting the
   limit holds.
+- **Status: Completed 2026-09-07** — count + insert now run inside one
+  transaction under a per-email `pg_advisory_xact_lock`; parallel-issuance test
+  asserts 5 concurrent requests yield exactly 3 successes.
 
 ### M3. `SELECT … FOR UPDATE` outside a transaction is a no-op (closure race)
 
@@ -685,6 +698,12 @@ Most important areas requiring attention:
 - **Recommended improvement:** Check `rowCount` after conditional UPDATEs;
   distinguish `not_found` from `conflict` in return types.
 - **Suggested validation:** Concurrency test (edit vs accept) + 404-vs-409 tests.
+- **Status: Completed 2026-09-07** — `editDraft` checks `rowCount` and
+  re-reads to return `not_found` vs `not_editable`; `acceptDraft` claims the
+  draft with a conditional `status='ready'` update (loser rolls back its
+  version insert); `discardDraft` returns `not_found`/`not_editable` and the
+  route maps them to 404/409 (was always 409). Tests cover both distinctions
+  plus the post-accept edit race.
 
 ### M8. Session idle-write on every request; per-request admin re-lookup
 

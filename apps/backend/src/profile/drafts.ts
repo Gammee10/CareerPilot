@@ -53,12 +53,19 @@ export async function editDraft(
   const validated = validateProposal(editedProposal);
   if (!validated.ok) return { ok: false, reason: "invalid_proposal" };
 
-  await db.query(
+  // M7: the conditional UPDATE is the atomic guard against a concurrent
+  // accept. A zero rowCount means we lost the race (or the draft vanished) —
+  // re-read to distinguish not_found from not_editable instead of blindly
+  // returning ok:true.
+  const updated = await db.query(
     `UPDATE resume_extraction_drafts SET proposed_content = $3, updated_at = $4
       WHERE id = $1 AND account_id = $2 AND status = 'ready'`,
     [draftId, accountId, JSON.stringify(validated.proposal), now]
   );
-  return { ok: true };
+  if ((updated.rowCount ?? 0) === 1) return { ok: true };
+  const current = await getOwnedDraft(db, accountId, draftId);
+  if (!current) return { ok: false, reason: "not_found" };
+  return { ok: false, reason: "not_editable" };
 }
 
 export type AcceptResult =
@@ -74,6 +81,11 @@ export async function acceptDraft(
   const client = await db.connect();
   try {
     await client.query("BEGIN");
+    // Serialize per draft so concurrent accept/edit/accept pairs resolve
+    // deterministically (H4/M7).
+    await client.query("SELECT pg_advisory_xact_lock(hashtext($1))", [
+      `draft:${draftId}`
+    ]);
     const draft = await getOwnedDraft(client, accountId, draftId);
     if (!draft) {
       await client.query("ROLLBACK");
@@ -89,18 +101,38 @@ export async function acceptDraft(
       return { ok: false, reason: "invalid_proposal" };
     }
 
-    // Save happens under the same lock so version numbering is consistent.
+    // Save happens under the same lock so version numbering is consistent
+    // (see saveProfileVersion's per-account lock + unique-violation retry).
     const maxRow = await client.query<{ max_version: number | null }>(
       "SELECT MAX(version_number) AS max_version FROM profile_versions WHERE account_id = $1",
       [accountId]
     );
     const nextVersion = (maxRow.rows[0].max_version ?? 0) + 1;
-    const inserted = await client.query<{ id: string }>(
-      `INSERT INTO profile_versions (account_id, version_number, source, content)
-       VALUES ($1, $2, 'extraction_draft', $3) RETURNING id`,
-      [accountId, nextVersion, JSON.stringify(validated.proposal)]
-    );
-    const versionId = inserted.rows[0].id;
+    let versionId: string;
+    try {
+      const inserted = await client.query<{ id: string }>(
+        `INSERT INTO profile_versions (account_id, version_number, source, content)
+         VALUES ($1, $2, 'extraction_draft', $3) RETURNING id`,
+        [accountId, nextVersion, JSON.stringify(validated.proposal)]
+      );
+      versionId = inserted.rows[0].id;
+    } catch (err) {
+      // Lost a concurrent version-number race: recompute once under the lock.
+      if (typeof err !== "object" || err === null || (err as { code?: string }).code !== "23505") {
+        throw err;
+      }
+      const retryMax = await client.query<{ max_version: number | null }>(
+        "SELECT MAX(version_number) AS max_version FROM profile_versions WHERE account_id = $1",
+        [accountId]
+      );
+      const retryVersion = (retryMax.rows[0].max_version ?? 0) + 1;
+      const inserted = await client.query<{ id: string }>(
+        `INSERT INTO profile_versions (account_id, version_number, source, content)
+         VALUES ($1, $2, 'extraction_draft', $3) RETURNING id`,
+        [accountId, retryVersion, JSON.stringify(validated.proposal)]
+      );
+      versionId = inserted.rows[0].id;
+    }
 
     await client.query(
       `INSERT INTO career_profiles (account_id, current_profile_version_id, updated_at)
@@ -109,12 +141,18 @@ export async function acceptDraft(
        DO UPDATE SET current_profile_version_id = $2, updated_at = $3`,
       [accountId, versionId, now]
     );
-    await client.query(
+    // Conditional claim: a concurrent accept/discard that won the race leaves
+    // rowCount 0 — roll back the version insert rather than double-accepting.
+    const claimed = await client.query(
       `UPDATE resume_extraction_drafts
           SET status = 'accepted', accepted_profile_version_id = $2, updated_at = $3
-        WHERE id = $1`,
+        WHERE id = $1 AND status = 'ready'`,
       [draftId, versionId, now]
     );
+    if ((claimed.rowCount ?? 0) !== 1) {
+      await client.query("ROLLBACK");
+      return { ok: false, reason: "not_editable" };
+    }
     await recordAudit(client, {
       actorType: "user",
       actorAccountId: accountId,
@@ -139,11 +177,15 @@ export async function discardDraft(
   accountId: string,
   draftId: string,
   now: Date
-): Promise<boolean> {
+): Promise<{ ok: true } | { ok: false; reason: "not_found" | "not_editable" }> {
   const updated = await db.query(
     `UPDATE resume_extraction_drafts SET status = 'discarded', updated_at = $3
       WHERE id = $1 AND account_id = $2 AND status = 'ready'`,
     [draftId, accountId, now]
   );
-  return (updated.rowCount ?? 0) === 1;
+  if ((updated.rowCount ?? 0) === 1) return { ok: true };
+  // M7: distinguish missing drafts (404) from already-consumed ones (409).
+  const current = await getOwnedDraft(db, accountId, draftId);
+  if (!current) return { ok: false, reason: "not_found" };
+  return { ok: false, reason: "not_editable" };
 }

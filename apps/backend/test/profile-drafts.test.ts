@@ -102,12 +102,52 @@ describe("draft workflow (T3.3)", () => {
   it("discarding a draft leaves no trace in the profile lineage", async () => {
     const { accountId, draftId } = await setupWithDraft();
     const { discardDraft } = await import("../src/profile/drafts.js");
-    expect(await discardDraft(h.db, accountId, draftId, t0)).toBe(true);
+    expect(await discardDraft(h.db, accountId, draftId, t0)).toEqual({ ok: true });
     const versions = await h.db.query(
       "SELECT id FROM profile_versions WHERE account_id = $1",
       [accountId]
     );
     expect(versions.rows).toHaveLength(0);
+  });
+
+  it("M7: missing vs consumed drafts distinguish 404 from 409", async () => {
+    const { accountId, draftId } = await setupWithDraft();
+    const drafts = await import("../src/profile/drafts.js");
+    expect(await drafts.discardDraft(h.db, accountId, "00000000-0000-4000-8000-000000000999", t0)).toEqual({
+      ok: false,
+      reason: "not_found"
+    });
+    const accepted = await drafts.acceptDraft(h.db, accountId, draftId, t0);
+    expect(accepted.ok).toBe(true);
+    // Edit after accept loses the race deterministically: not_editable, not ok.
+    expect(await drafts.editDraft(h.db, accountId, draftId, PROPOSAL, t0)).toEqual({
+      ok: false,
+      reason: "not_editable"
+    });
+    // Discard after accept is consumed (409-class), not missing.
+    expect(await drafts.discardDraft(h.db, accountId, draftId, t0)).toEqual({
+      ok: false,
+      reason: "not_editable"
+    });
+  });
+
+  it("H4: parallel profile saves serialize to distinct version numbers", async () => {
+    const adminId = await createBootstrapAdmin(h.db, "admin5@example.invalid");
+    const user = await createActiveUser(h, "parallel@example.invalid", adminId, t0);
+    const { saveProfileVersion } = await import("../src/profile/profileVersions.js");
+    const [a, b] = await Promise.all([
+      saveProfileVersion(h.db, user.accountId, { summary: "a" }, "manual", t0),
+      saveProfileVersion(h.db, user.accountId, { summary: "b" }, "manual", t0)
+    ]);
+    expect(a.ok).toBe(true);
+    expect(b.ok).toBe(true);
+    if (!a.ok || !b.ok) throw Error("setup");
+    expect([a.versionNumber, b.versionNumber].sort()).toEqual([1, 2]);
+    const rows = await h.db.query<{ version_number: number }>(
+      "SELECT version_number FROM profile_versions WHERE account_id = $1 ORDER BY version_number",
+      [user.accountId]
+    );
+    expect(rows.rows.map((r) => r.version_number)).toEqual([1, 2]);
   });
 
   it("manual completion path works without any resume or draft (FR-0a)", async () => {

@@ -180,4 +180,26 @@ describe("Node-side proposal validation (ADR-029/054)", () => {
       expect(res.body).toEqual({ error: "document_not_found" });
     });
   });
+
+  it("H4: parallel duplicate extractions persist exactly one draft", async () => {
+    const { docId, accountId } = await uploadTextResume("Parallel text.");
+    const ai = new RecordingAiClient(() => VALID_PROPOSAL);
+    const [a, b] = await Promise.all([
+      runExtraction(h.db, store, ai, accountId, docId, t0),
+      runExtraction(h.db, store, ai, accountId, docId, t0)
+    ]);
+    expect(a.ok).toBe(true);
+    expect(b.ok).toBe(true);
+    const drafts = await h.db.query<{ id: string }>(
+      "SELECT id FROM resume_extraction_drafts WHERE resume_document_id = $1",
+      [docId]
+    );
+    // One persisted outcome per logical input (ADR-045). Note: both workers
+    // may still pay the provider call (AI happens before the DB lock); the
+    // guarantee is a single draft + idempotent reuse, not a single AI call.
+    expect(drafts.rows).toHaveLength(1);
+    if (a.ok && b.ok) {
+      expect([a.draftId, b.draftId]).toEqual([drafts.rows[0].id, drafts.rows[0].id]);
+    }
+  });
 });

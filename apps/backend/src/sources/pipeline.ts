@@ -1,5 +1,5 @@
 // Shared job-processing pipeline (T4.2–T4.6, ADR-012/037/006/046/039/007).
-import type { Pool } from "pg";
+import type { Pool, PoolClient } from "pg";
 import { materialFingerprint, type SourceObservation } from "./contract.js";
 import { validateSourceObservation } from "./contract.js";
 import { recordAudit } from "../identity/audit.js";
@@ -97,7 +97,7 @@ export async function persistObservation(
     }
 
     // Canonicalize BEFORE writing the observation so it can reference the run.
-    const canonicalJobId = await ensureCanonicalJob(client as unknown as Pool, obs);
+    const canonicalJobId = await ensureCanonicalJob(client, obs);
 
     // Classification vs previous observation.
     const previous = listing.rows[0].latest_hash;
@@ -164,10 +164,17 @@ export async function persistObservation(
 // ---------------------------------------------------------------------------
 // T4.3 Canonicalization — layered conservative matching (ADR-006/038)
 // ---------------------------------------------------------------------------
-async function ensureCanonicalJob(db: Pool, obs: SourceObservation): Promise<string> {
+async function ensureCanonicalJob(db: Pool | PoolClient, obs: SourceObservation): Promise<string> {
   // Strong shared identifier only: exact normalized company+title+location
   // across already-keyed listings (ADR-006 layered conservative matching).
   const key = strongMatchKey(obs);
+  // H4: serialize concurrent canonicalizations on the match key. Without a
+  // DB-level unique constraint on strong_match_key (deliberately avoided: the
+  // ambiguous→separate-candidate rule needs duplicates to stay possible), two
+  // workers could otherwise insert divergent canonical_jobs for one key.
+  // Callers invoke this inside a transaction, so the xact lock is held until
+  // the listing row points at the canonical job.
+  await db.query("SELECT pg_advisory_xact_lock(hashtext($1))", [`canonical:${key}`]);
   const rows = await db.query<{ id: string }>(
     `SELECT DISTINCT cj.id
        FROM canonical_jobs cj

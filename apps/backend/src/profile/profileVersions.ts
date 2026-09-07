@@ -82,46 +82,64 @@ export async function saveProfileVersion(
   const validated = validateProfileContent(rawContent);
   if (!validated.ok) return { ok: false, reason: "invalid_content" };
 
-  const client = await db.connect();
-  try {
-    await client.query("BEGIN");
-    const maxRow = await client.query<{ max_version: number | null }>(
-      "SELECT MAX(version_number) AS max_version FROM profile_versions WHERE account_id = $1",
-      [accountId]
-    );
-    const nextVersion = (maxRow.rows[0].max_version ?? 0) + 1;
+  // H4: concurrent saves race MAX()+1 against the UNIQUE(account_id,
+  // version_number) constraint. Serialize per account with an advisory lock
+  // and retry once on a unique violation (e.g. lock bypass in tests).
+  for (let attempt = 0; attempt < 3; attempt++) {
+    const client = await db.connect();
+    try {
+      await client.query("BEGIN");
+      await client.query("SELECT pg_advisory_xact_lock(hashtext($1))", [
+        `profile-versions:${accountId}`
+      ]);
+      const maxRow = await client.query<{ max_version: number | null }>(
+        "SELECT MAX(version_number) AS max_version FROM profile_versions WHERE account_id = $1",
+        [accountId]
+      );
+      const nextVersion = (maxRow.rows[0].max_version ?? 0) + 1;
 
-    const inserted = await client.query<{ id: string }>(
-      `INSERT INTO profile_versions (account_id, version_number, source, content)
-       VALUES ($1, $2, $3, $4) RETURNING id`,
-      [accountId, nextVersion, source, JSON.stringify(validated.content)]
-    );
-    const versionId = inserted.rows[0].id;
+      const inserted = await client.query<{ id: string }>(
+        `INSERT INTO profile_versions (account_id, version_number, source, content)
+         VALUES ($1, $2, $3, $4) RETURNING id`,
+        [accountId, nextVersion, source, JSON.stringify(validated.content)]
+      );
+      const versionId = inserted.rows[0].id;
 
-    await client.query(
-      `INSERT INTO career_profiles (account_id, current_profile_version_id, updated_at)
-       VALUES ($1, $2, $3)
-       ON CONFLICT (account_id)
-       DO UPDATE SET current_profile_version_id = $2, updated_at = $3`,
-      [accountId, versionId, now]
-    );
-    await recordAudit(client, {
-      actorType: "user",
-      actorAccountId: accountId,
-      action: "profile.saved",
-      outcome: "success",
-      targetCategory: "profile_version",
-      targetId: versionId,
-      details: { version_number: nextVersion, source }
-    });
-    await client.query("COMMIT");
-    return { ok: true, profileVersionId: versionId, versionNumber: nextVersion };
-  } catch (err) {
-    await client.query("ROLLBACK").catch(() => undefined);
-    throw err;
-  } finally {
-    client.release();
+      await client.query(
+        `INSERT INTO career_profiles (account_id, current_profile_version_id, updated_at)
+         VALUES ($1, $2, $3)
+         ON CONFLICT (account_id)
+         DO UPDATE SET current_profile_version_id = $2, updated_at = $3`,
+        [accountId, versionId, now]
+      );
+      await recordAudit(client, {
+        actorType: "user",
+        actorAccountId: accountId,
+        action: "profile.saved",
+        outcome: "success",
+        targetCategory: "profile_version",
+        targetId: versionId,
+        details: { version_number: nextVersion, source }
+      });
+      await client.query("COMMIT");
+      return { ok: true, profileVersionId: versionId, versionNumber: nextVersion };
+    } catch (err) {
+      await client.query("ROLLBACK").catch(() => undefined);
+      // Unique violation on (account_id, version_number): concurrent saver
+      // won the number — retry with a fresh MAX().
+      if (
+        attempt < 2 &&
+        typeof err === "object" && err !== null &&
+        (err as { code?: string }).code === "23505"
+      ) {
+        continue;
+      }
+      throw err;
+    } finally {
+      client.release();
+    }
   }
+  throw new Error("profile_version_retry_exhausted");
 }
 
 // Current profile resolution: latest approved version (domain-model rule).

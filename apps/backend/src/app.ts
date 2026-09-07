@@ -508,9 +508,12 @@ export function buildApp(deps: AppDeps): Express {
     requireSession(db, nowFn),
     requireSelf("accountId"),
     async (req, res) => {
-      const ok = await discardDraft(db, req.auth!.accountId, String(req.params.draftId), nowFn());
-      if (!ok) {
-        res.status(409).json({ error: "not_discardable" });
+      const result = await discardDraft(db, req.auth!.accountId, String(req.params.draftId), nowFn());
+      if (!result.ok) {
+        // M7: missing drafts are 404; already-consumed ones are 409.
+        res.status(result.reason === "not_found" ? 404 : 409).json({
+          error: result.reason === "not_found" ? "not_found" : "not_discardable"
+        });
         return;
       }
       res.status(200).json({ status: "discarded" });
