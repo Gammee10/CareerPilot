@@ -1,5 +1,8 @@
 /** @type {import('next').NextConfig} */
 const nextConfig = {
+  // L6: standalone output — the runtime image ships only the prebuilt
+  // server, no source and no node_modules install step.
+  output: "standalone",
   poweredByHeader: false,
   async headers() {
     // Document-level hardening for the dashboard (H10). The API's own

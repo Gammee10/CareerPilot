@@ -1067,6 +1067,20 @@ Most important areas requiring attention:
   Dependabot, tighten ignore files.
 - **Suggested validation:** CI `docker build` of all three images (currently missing);
   image-size + cold-start comparison.
+- **Status: Completed 2026-09-08** — backend is multi-stage (`npm ci` →
+  `tsc -p tsconfig.build.json` → `node dist`, tsx moved to devDependencies,
+  `dev`/`start` scripts split for local vs prod); frontend is multi-stage
+  with `output: standalone` runtime (17 modules, no source/devDeps);
+  all installs are `npm ci`; base images + compose postgres/caddy are
+  digest-pinned with `.github/dependabot.yml` (docker/npm/pip/actions)
+  covering bumps; per-context `.dockerignore` added (frontend/ai) and root
+  tightened (ops/scripts/caddy/backups/tests). Proven: all three images
+  build, `compose up --build --wait` fully healthy, public
+  `/api/healthz` ok via Caddy + frontend 200. Two real bugs caught:
+  standalone binds Docker's HOSTNAME (fixed with `HOSTNAME: 0.0.0.0`) and
+  the lockfile lagged the tsx move (re-synced). Deliberately skipped:
+  in-image HEALTHCHECK (compose already healthchecks every service) and
+  tini (single-process exec-form images; node handles SIGTERM as PID 1).
 
 ### L7. CI gaps: no secrets/dependency scanning, no prod builds, weak hardening
 

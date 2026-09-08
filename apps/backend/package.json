@@ -4,9 +4,13 @@
   "private": true,
   "type": "module",
   "scripts": {
+    "build": "tsc -p tsconfig.build.json",
+    "dev": "tsx src/server.ts",
+    "dev:worker": "tsx src/worker/index.ts",
     "migrate": "tsx src/tools/migrate.ts",
-    "start": "tsx src/server.ts",
-    "start:worker": "tsx src/worker/index.ts",
+    "start": "node dist/server.js",
+    "start:worker": "node dist/worker/index.js",
+    "start:migrate": "node dist/tools/migrate.js",
     "lint": "eslint .",
     "typecheck": "tsc --noEmit"
   },
@@ -15,14 +19,14 @@
     "express-rate-limit": "^8.7.0",
     "helmet": "^8.3.0",
     "pg": "^8.13.0",
-    "pg-boss": "^10.4.2",
-    "tsx": "^4.19.0"
+    "pg-boss": "^10.4.2"
   },
   "devDependencies": {
     "@types/express": "^5.0.0",
     "@types/node": "^22.10.0",
     "@types/pg": "^8.11.0",
     "eslint": "^9.39.5",
+    "tsx": "^4.19.0",
     "typescript": "^5.7.0",
     "typescript-eslint": "^8.67.0",
     "vitest": "^3.2.7"

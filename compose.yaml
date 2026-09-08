@@ -38,7 +38,8 @@ secrets:
 
 services:
   postgres:
-    image: postgres:17-alpine
+    # L6: digest-pinned; bump with .github/dependabot.yml docker updates.
+    image: postgres:17-alpine@sha256:18cfe3ef5e6815560c98237d6216d1e5119702fb0f3894c8785dd58b8bbe5d73
     environment:
       POSTGRES_DB: ${POSTGRES_DB:-careerpilot}
       POSTGRES_USER: ${POSTGRES_USER:-careerpilot}
@@ -62,7 +63,7 @@ services:
     build:
       context: .
       dockerfile: apps/backend/Dockerfile
-    command: ["npx", "tsx", "src/tools/migrate.ts"]
+    command: ["node", "dist/tools/migrate.js"]
     environment:
       PGHOST: postgres
       PGPORT: "5432"
@@ -83,7 +84,7 @@ services:
     build:
       context: .
       dockerfile: apps/backend/Dockerfile
-    command: ["npx", "tsx", "src/server.ts"]
+    command: ["node", "dist/server.js"]
     environment:
       PORT: "8080"
       PGHOST: postgres
@@ -117,7 +118,7 @@ services:
     build:
       context: .
       dockerfile: apps/backend/Dockerfile
-    command: ["npx", "tsx", "src/worker/index.ts"]
+    command: ["node", "dist/worker/index.js"]
     environment:
       WORKER_HEALTH_PORT: "8081"
       PGHOST: postgres
@@ -168,6 +169,10 @@ services:
       context: ./apps/frontend
     environment:
       PORT: "3000"
+      # L6: Docker injects HOSTNAME=<container-id>; Next standalone binds to
+      # it literally (/etc/hosts -> container IP only, no loopback), which
+      # breaks the loopback healthcheck. Bind all interfaces instead.
+      HOSTNAME: 0.0.0.0
       NODE_ENV: production
       BACKEND_INTERNAL_URL: http://backend:8080
     networks:
@@ -184,7 +189,8 @@ services:
     restart: unless-stopped
 
   caddy:
-    image: caddy:2-alpine
+    # L6: digest-pinned; bump with .github/dependabot.yml docker updates.
+    image: caddy:2-alpine@sha256:5f5c8640aae01df9654968d946d8f1a56c497f1dd5c5cda4cf95ab7c14d58648
     environment:
       DOMAIN: ${DOMAIN:-}
     ports:

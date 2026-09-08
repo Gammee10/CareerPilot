@@ -1,0 +1,9 @@
+# AI build context (services/ai) — keep bytecode caches and local venvs out.
+__pycache__
+*.pyc
+.pytest_cache
+.ruff_cache
+.venv
+*.log
+.env
+.env.*

@@ -9,4 +9,16 @@ coverage
 *.log
 .env
 .env.*
-compose.override.yaml
+# L6: nothing outside apps/backend + db/ is COPYed into the backend image,
+# but keep ops/dev surfaces out of every build context explicitly.
+ops/
+scripts/
+caddy/
+backups/
+compose*.yaml
+CODEBASE_IMPROVEMENTS.md
+*.tsbuildinfo
+apps/backend/test/
+apps/backend/dist/
+db/tests/
+**/*.test.ts
