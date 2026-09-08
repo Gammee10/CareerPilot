@@ -4,6 +4,35 @@ Newest entries first. Append-only — never delete or rewrite prior entries.
 
 ---
 
+## 2026-09-07/08 - Improvement implementation batch 1 (one-per-commit, all pushed)
+
+**Done:** Implemented + validated + pushed (each own commit): C2 AI caller auth,
+C3 Resend mailer, C4 extraction ownership, C5 job-detail ownership, H1 evaluate
+gates, H2 Bearer removal, C1 admin-session test, C6 real pacing, C7 resume-grace
+writer+sweeper, C8 observation-delete guards, H5 run targets, H7 shared job view,
+H3/M1/M3 atomic redemption, H4/M2/M7 concurrency, H8 adapter caps, H10 HTTP
+hardening, H11 cookies, M5 profile validation, M6 UUID guards, M14/O1 AI
+hardening, M4 search strategy, M8 lazy sessions, M9 worker lifecycle, M10
+availability batching, H6 dashboard batching, H15 indexes, H16 async
+reevaluation, H9 grant-header transport, X1 /api-prefix routing fix (found live:
+every browser API call 404'd), H12 backup hardening, H13 secrets hygiene.
+
+**Verified:** Full vitest suite (21 files / 221 tests), schema tests, backup
+suite end-to-end, AI pytest, frontend lint/typecheck/build, compose configs,
+caddy validate, live stack probes. CI green at run #44 after fixing a
+Linux-only test-harness ownership bug (runs #41–43 red on the backup step;
+Windows NTFS binds had masked it).
+
+**Deviations surfaced:** a few deliberate, report-recorded deviations
+(H1 no pre-existing-evaluation scoping — budget instead; H10 no hpp/cors-mount;
+H15 sweep-role separation deferred; H9 no blanket /api log_skip; H4 single AI
+call not guaranteed under concurrency).
+
+**Next step:** Continue the report with L4 (config/.env), L5–L7, frontend group
+(H14/M12/M13/L2/O4), then L1/L3/L8/O2/O3/O5.
+
+---
+
 ## 2026-09-07 - Comprehensive codebase improvement audit (no code changes)
 
 **Done:** Deep review of backend, frontend, AI service, DB migrations, ops/scripts, Caddy, secrets, CI, and tests. Delivered `CODEBASE_IMPROVEMENTS.md` with 51 findings (8 Critical, 16 High, 14 Medium, 8 Low, 5 Optional), each with location, problem, fix, implementation guidance, and validation. Top themes: dead admin-session role, open AI `/extract`, LoggingMailer wired in prod, extraction/job-detail IDOR gaps, collection pacing no-op, resume-retention writer missing, plus hardening/perf/ops follow-ups.
