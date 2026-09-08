@@ -2,7 +2,7 @@
 # provides the runtime shell + health endpoint only. Purpose-scoped AI tasks
 # arrive in later phases behind the Node-owned background-work path.
 
-fastapi==0.115.*
+fastapi==0.141.*
 uvicorn==0.34.*
 # O5: pydantic is imported directly by main.py — a direct dependency, not
 # a transitive one. Production installs the hashed requirements.lock.
