@@ -55,12 +55,21 @@ send_alert() {
     return 0
   fi
   local KEY_FILE="${RESEND_API_KEY_FILE:?set RESEND_API_KEY_FILE or DRY_RUN=1}"
-  local KEY; KEY="$(cat "$KEY_FILE")"
+  # H13: the API key never appears in a process argument vector (visible via
+  # `ps`). It travels to curl in a 0600 config file, which is removed (and
+  # the shell variable unset) before returning.
+  local KEY CFG
+  KEY="$(cat "$KEY_FILE")"
+  CFG="$(mktemp)"
+  chmod 600 "$CFG"
+  printf 'header = "Authorization: Bearer %s"\n' "$KEY" > "$CFG"
   curl -s -X POST https://api.resend.com/emails \
-    -H "Authorization: Bearer $KEY" \
+    --config "$CFG" \
     -H "content-type: application/json" \
     -d "{\"from\":\"alerts@resend.dev\",\"to\":[\"${ALERT_RECIPIENT:?set ALERT_RECIPIENT}\"],\"subject\":\"$SUBJECT\",\"text\":\"$(printf '%b' "$BODY" | tr '\n' ';')\"}" \
     >/dev/null || true
+  rm -f "$CFG"
+  unset KEY
 }
 
 if [ -n "$ALERTS" ]; then

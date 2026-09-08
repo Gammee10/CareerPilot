@@ -13,11 +13,16 @@ secrets/
     session_signing_key.txt      <- backend session signing key (placeholder in Phase 1)
     resend_api_key.txt           <- Resend credential scoped to auth/email capability
     gemini_api_key.txt           <- Gemini credential scoped to FastAPI AI capability
+    ai_internal_token.txt        <- internal backend<->AI bearer token (C2)
     LOCAL_ONLY_MARKER.txt        <- warning marker written by the generator
   prod/                          <- PRODUCTION (VM only), populated by
-                                    scripts/fetch-vault-secrets.sh from OCI Vault.
-                                    Same filenames as local/.
+                                     scripts/fetch-vault-secrets.sh from OCI Vault.
+                                     Same filenames as local/.
 ```
+
+> NOTE: the backup encryption key (`BACKUP_ENCRYPTION_KEY_FILE`) is a
+> VM/Vault-held capability secret like the rest — it is never mounted into
+> app containers and never stored under this directory.
 
 ## Rules (non-negotiable per ADR-056)
 
@@ -38,6 +43,25 @@ secrets/
 | session_signing_key    | ✘        | ✔       | ✘      | ✘  | ✘        | ✘     |
 | resend_api_key         | ✘        | ✔       | ✘      | ✘  | ✘        | ✘     |
 | gemini_api_key         | ✘        | ✘       | ✘      | ✔  | ✘        | ✘     |
+| ai_internal_token      | ✘        | ✔       | ✔      | ✔  | ✘        | ✘     |
 
 Local dev placeholders are clearly marked (`local/LOCAL_ONLY_MARKER.txt`) and
 are never valid production credentials.
+
+## Workstation hygiene (H13)
+
+If this repository lives under a cloud-synced folder (e.g. OneDrive), the
+sync client will copy `secrets/local/` to the cloud provider — against the
+ADR-056 spirit even for throwaway dev secrets, and catastrophic if a
+production secret is ever staged here. Either:
+
+1. Move the checkout out of the synced tree, or
+2. Add a sync exclusion for `<repo>/secrets/` (OneDrive: Settings → Account →
+   Choose folders is per-folder allowlist; third-party clients vary — verify
+   the exclusion took effect), or
+3. At minimum, confirm `git status` never shows secret material (the
+   root `.gitignore` covers `secrets/*`, `backups*/`, drill temporaries, and
+   `*.dump.enc` artifacts — verify with `git check-ignore` after cloning).
+
+Production secrets are NEVER staged on a dev workstation: `secrets/prod/`
+exists only on the OCI VM, populated by `scripts/fetch-vault-secrets.sh`.

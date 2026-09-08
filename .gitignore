@@ -20,6 +20,15 @@ __pycache__/
 coverage/
 *.log
 
+# Backup + drill artifacts (H13) — live key material, dumps, and manifests
+# must never be committed (a careless `git add -A` stays safe).
+backups/
+backups-test/
+*.dump.enc
+*.dump.enc.sha256
+.replay.csv
+.drill-key.tmp
+
 # OS / editor
 .DS_Store
 Thumbs.db

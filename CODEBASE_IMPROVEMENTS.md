@@ -569,6 +569,10 @@ Most important areas requiring attention:
   via manifest before decrypting. `test-backup.sh` covers manifest match,
   bucket round-trip, both negative upload paths, drill pass with
   deletion-replay proof, and tamper rejection — full script green end to end.
+  Follow-up fix (same week): the new upload block wrote the fake bucket and
+  tamper copies from the host into a root-owned tree — Permission denied on
+  Linux CI (runs #41–43 red, Windows green through NTFS bind semantics). All
+  writes into that tree now go through the container; the host only reads.
 
 ### H13. Secrets handling gaps: OneDrive sync, test-key gitignore, key in process list
 
@@ -592,6 +596,16 @@ Most important areas requiring attention:
 - **Suggested validation:** `git check-ignore` on each artifact path; `ps`-based
   manual check during a dry-run alert; failed-run cleanup test (`kill -9` then
   `git status` shows nothing sensitive).
+- **Status: Completed 2026-09-08** — `.gitignore` covers `backups*/`,
+  `*.dump.enc*`, `.replay.csv`, `.drill-key.tmp` (proven: `git status` clean
+  with live key material present); Resend key travels via a 0600 curl
+  `--config` header file (removed + variable unset after send); `PGPASSWORD`
+  is function-local + exported only inside `dump_database()` (shipped earlier
+  inside the a5985a1 backup commit); OneDrive risk documented in
+  `secrets/README.md` with exclusion guidance + `ai_internal_token` added to
+  the structure/matrix docs (moving the checkout itself is an operator
+  action). Validated: `git check-ignore`, DRY_RUN payload, full
+  `test-backup.sh` green locally and in CI (#44).
 
 ### H14. Frontend unsafe URL sink (`javascript:`/`data:` executable on click)
 
