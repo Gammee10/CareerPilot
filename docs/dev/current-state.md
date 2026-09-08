@@ -1,6 +1,6 @@
 ﻿# Current State
 
-Last updated: 2026-09-08 (improvement-implementation session — in progress)
+Last updated: 2026-09-08 (improvement-implementation session — ALL ITEMS COMPLETE)
 
 ## Improvement Implementation State (2026-09-07/08)
 
@@ -8,8 +8,9 @@ Working through `CODEBASE_IMPROVEMENTS.md` (51 findings + post-audit X1) one
 improvement per commit, all pushed to `main`. CI green at runs #44 and #47;
 new CI coverage (L7) pending its first run.
 
-- Completed + pushed: C1–C8, H1–H13, H15, H16, M1–M8, M10, M14, O1, X1, L4,
-  L5, L6, L7.
+- Completed + pushed: C1–C8, H1–H16, M1–M14, L1–L8, O1–O5, X1 — the
+  entire `CODEBASE_IMPROVEMENTS.md` backlog (51 findings + X1), each
+  improvement in its own validated commit on `main`.
   - L4: single `readSecretFile` behind every secret load (operational
     missing/empty errors); `.env.example` documents every consumed var.
   - L5: idempotent migrations (guards everywhere) + lock-first
@@ -17,18 +18,33 @@ new CI coverage (L7) pending its first run.
     validation); Windows-host migrate path fixed (fileURLToPath).
   - L6: precompiled multi-stage images (`node dist`, frontend standalone),
     `npm ci`, digest pins + Dependabot, per-context dockerignores; full
-    compose stack verified healthy (caught standalone-HOSTNAME bind bug;
-    fixed via `HOSTNAME: 0.0.0.0`).
+    compose stack verified healthy (caught standalone-HOSTNAME bind bug).
   - L7: gitleaks job (history clean), backend build-gate + blocking npm
     audit (qs fixed, 0 vulns), advisory frontend/pip audits with causes
     recorded, `images` job (builds + trivy SARIF report-only — residual
     HIGH/CRITICALs are base-layer), SHA-pinned actions, least-privilege
     permissions, concurrency, timeouts, `identity` → `backend-tests`.
+    (Follow-up fix: trivy one-target-per-invocation, committed with H14.)
+  - Frontend group: H14 https-only links + vitest; M12 never-throw `api()`,
+    pending/error/rollback states, token stripping; M13 labels/ARIA,
+    hoisted components, jsx-a11y + react-hooks lint (reported mojibake
+    proven a viewer artifact — files are valid UTF-8); L2 uniform
+    credentials + email normalization; O4 metadata/error boundary/skip
+    link/focus styles.
+  - L1 malformed-cookie 401; L3 put-after-commit uploads + verified
+    downloads (503 on storage failure); L8 full truncate coverage + drift
+    test, vault OCI syntax fix, `test-ops.sh` (30 assertions) in CI, backup
+    flock (caught health-check `grep -v healthy` matching `(unhealthy)`
+    + flock-before-`fail()` ordering bugs); O2 mem/log caps + readyz/queue
+    checks; O3 verified complete (413/400/429 already covered); O5 hashed
+    pip lock + CycloneDX SBOM artifacts.
 - Gate APPROVED status unchanged; re-run relevant ADR-030 evidence rows when
   fixes land (per change, recorded in the report statuses).
-- Remaining per report order: frontend group (H14/M12/M13/L2-remainder/O4),
-  L1, L3, L8, optionals O2/O3/O5. Full suite last green:
-  21 files / 221 tests + schema tests + backup suite + AI pytest.
+- Nothing remaining in the report. Open Dependabot PRs (eslint 10 major,
+  typescript-eslint, @types/node 26, codeql-action 4.x, etc.) left for
+  explicit review — majors not merged blindly. Full suite last green:
+  23 files / 225 tests + frontend 9 tests + schema tests + backup suite +
+  AI pytest (11).
 
 ## Review State (2026-09-07)
 

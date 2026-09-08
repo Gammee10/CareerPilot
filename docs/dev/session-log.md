@@ -4,6 +4,36 @@ Newest entries first. Append-only - never delete or rewrite prior entries.
 
 ---
 
+## 2026-09-08 - Improvement implementation batch 3: frontend group + L1/L3/L8 + optionals (ALL COMPLETE)
+
+**Done:** H14 (https-only links + frontend vitest), M12 (never-throw api,
+pending/error/rollback, token strip, CI npm test), M13 (labels/ARIA, hoisted
+components, jsx-a11y + react-hooks), L2 remainder (credentials + email
+normalize), O4 remainder (metadata, global-error, skip link, focus styles),
+L1 (malformed-cookie 401), L3 (put-after-commit, verified downloads, 503),
+L8 (truncate coverage + drift test, vault syntax fix, test-ops.sh 30/30,
+backup flock), O2 bounded (mem/log caps, readyz + queue checks), O3
+verify-only (already covered), O5 (hashed pip lock, SBOM artifacts).
+CI incident: trivy multi-target invocation failed run #77 (user-pasted log);
+fixed to one image per run — main run #78 green. Each item its own commit,
+all pushed.
+
+**Verified:** frontend 9 tests + lint/typecheck/build; backend full suite
+23 files / 225 tests; storage 8/8 + extraction/drafts/retention 29/29;
+test-ops.sh 30/30; shellcheck clean; compose config valid; AI lock install
++ 11/11 pytest; CI #78 green, #96 (final) watched to green.
+
+**Deviations surfaced:** Playwright/RLS/coverage-thresholds/metrics-traces/
+pagination-envelope/npm-hash-pinning deferred with rationale in report;
+trivy + frontend/pip audits advisory (base-layer / upstream-blocked);
+metadataBase omitted (no canonical domain); vault script still needs one
+live OCI run before prod use. Dependabot PRs left open for explicit review.
+
+**Next step:** backlog complete. Operational onboarding stands: OCI tenancy,
+live vault run, prod deploy, pre-launch Lighthouse/axe + ADR-030 re-runs.
+
+---
+
 ## 2026-09-08 - Improvement implementation batch 2: L4/L5/L6/L7 (one-per-commit, all pushed)
 
 **Done:** L4 config contract + secret reader (config.test.ts); L5 migration
