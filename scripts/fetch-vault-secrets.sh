@@ -9,18 +9,17 @@
 #
 # Prerequisites (documented, not assumed):
 #   - OCI CLI configured with an instance principal or user profile whose
-#     identity policy grants read ONLY on the careerpilot secret family in
-#     the approved vault (capability-scoped per ADR-028).
-#   - Vault OCID and compartment OCID provisioned by the operator.
+#     identity policy grants read ONLY on the `careerpilot-*` secret bundles
+#     in the approved compartment (capability-scoped per ADR-028).
+#   - The five `careerpilot-<name>` secret bundles provisioned in the vault
+#     ahead of deploy time.
 #
-# This script is a procedure template: the operator supplies the vault/secret
-# OCIDs at deploy time via environment variables. It writes each secret to
-# secrets/prod/<name>.txt (mode 600), matching the filenames in compose.yaml.
+# This script is a procedure template: the operator provisions
+# `careerpilot-<name>` secret bundles in the vault ahead of deploy time. It
+# writes each secret to secrets/prod/<name>.txt (mode 600), matching the
+# filenames in compose.yaml.
 # =============================================================================
 set -euo pipefail
-
-: "${CAREERPILOT_COMPARTMENT_OCID:?set CAREERPILOT_COMPARTMENT_OCID}"
-: "${CAREERPILOT_VAULT_OCID:?set CAREERPILOT_VAULT_OCID}"
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 OUT="$ROOT/secrets/prod"
@@ -30,12 +29,13 @@ chmod 700 "$OUT"
 SECRET_NAMES=(postgres_password session_signing_key resend_api_key gemini_api_key ai_internal_token)
 
 for name in "${SECRET_NAMES[@]}"; do
+  # L8: verified OCI data-plane syntax. `oci secrets secret-bundle get`
+  # addresses a bundle by NAME (no compartment/vault flags on this call);
+  # the payload lives at data."secret-bundle-content".content (base64).
   base64_secret="$(oci secrets secret-bundle get \
     --auth instance_principal \
-    --compartment-id "$CAREERPILOT_COMPARTMENT_OCID" \
-    --vault-id "$CAREERPILOT_VAULT_OCID" \
-    --secret-name "careerpilot-${name}" \
-    --query 'data."secret-batch-content".content' \
+    --secret-bundle-name "careerpilot-${name}" \
+    --query 'data."secret-bundle-content".content' \
     --raw-output)"
   printf '%s' "$base64_secret" | base64 -d > "$OUT/$name.txt"
   chmod 600 "$OUT/$name.txt"

@@ -166,6 +166,8 @@ jobs:
         run: bash scripts/test-schema.sh
       - name: Backup pipeline + restore drill with deletion replay (T8.3/T8.4)
         run: bash scripts/test-backup.sh
+      - name: Ops-path tests — vault fetch, health-check dry-run, upload round-trip, retention, flock (L8)
+        run: bash scripts/test-ops.sh
 
   images:
     # L7: CI builds the actual prod images and scans them. The scan is

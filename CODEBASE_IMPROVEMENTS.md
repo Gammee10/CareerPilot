@@ -1170,6 +1170,23 @@ Most important areas requiring attention:
   mapping; shellcheck + dry-run test for health-check; integration-test the Vault
   fetch against the real CLI shape before first prod run.
 - **Suggested validation:** Full suite green + new coverage; `shellcheck` clean.
+- **Status: Completed 2026-09-08** — `resetDb` now truncates all 26 mutable
+  tables (was 10) with `RESET_TABLES` exported, plus a drift test asserting
+  information_schema coverage (fails on future omissions); full suite
+  23 files / 225 tests green under the wider reset. Vault script fixed to
+  the real data-plane syntax (`secret-bundle-name` addressing,
+  `secret-bundle-content` key — the old flags/query never existed) and
+  covered by a stub-`oci` round-trip test (decode + 600/700 modes + arg
+  contract); still needs one live run against the real CLI before first
+  prod use. `scripts/test-ops.sh` (28 assertions, wired into CI):
+  health-check DRY_RUN healthy/sick paths, backup UPLOAD/DOWNLOAD
+  round-trip + retention prune + flock contention. Two real bugs caught:
+  health-check's `grep -v healthy` also matched `(unhealthy)` (now exact
+  `(healthy)`), and the flock block ran before `fail()` was defined (moved
+  after). Backup flock added. Frontend vitest + AI pytest already existed
+  (H14/M12/L7). shellcheck warning-level clean on all touched scripts.
+  Deliberately deferred: Playwright smoke, RLS/route-coverage audit
+  (architectural scope, suggest follow-up).
 
 ---
 

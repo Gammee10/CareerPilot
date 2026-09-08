@@ -12,14 +12,40 @@ export function makeTestPool(): Pool {
   return new Pool({ ...testDbConfig(), database: TEST_DB });
 }
 
+// L8: every mutable table, derived from db/migrations/*.sql. job_sources is
+// intentionally EXCLUDED (seeded reference data the registry gates on);
+// schema_migrations is excluded (migration bookkeeping, not fixtures).
+export const RESET_TABLES = [
+  "accounts",
+  "invitations",
+  "sessions",
+  "signin_links",
+  "administrator_role_changes",
+  "exceptional_access_requests",
+  "preservation_holds",
+  "audit_events",
+  "career_profiles",
+  "resume_documents",
+  "resume_extraction_drafts",
+  "resume_upload_grants",
+  "profile_versions",
+  "canonical_jobs",
+  "discovery_runs",
+  "source_collection_attempts",
+  "source_listings",
+  "source_listing_observations",
+  "canonical_job_reconciliations",
+  "availability_history",
+  "search_strategy",
+  "search_terms",
+  "evaluations",
+  "user_job_reviews",
+  "disclosure_acknowledgements",
+  "idempotency_records"
+];
+
 export async function resetDb(pool: Pool): Promise<void> {
-  await pool.query(
-    `TRUNCATE accounts, invitations, sessions, signin_links,
-              administrator_role_changes, audit_events,
-              canonical_jobs, source_listings, availability_history,
-              canonical_job_reconciliations
-      RESTART IDENTITY CASCADE`
-  );
+  await pool.query(`TRUNCATE ${RESET_TABLES.join(", ")} RESTART IDENTITY CASCADE`);
 }
 
 export type Harness = {

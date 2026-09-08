@@ -44,6 +44,13 @@ fail() {
   exit 1
 }
 
+# L8: serialize overlapping cron runs. Placed after fail() is defined: a
+# busy lock fails loudly (the health-check alerts on the non-zero exit)
+# instead of interleaving two backups over the same artifact names.
+LOCKFILE="$BACKUP_DIR/.backup.lock"
+exec 9>"$LOCKFILE"
+flock -n 9 || fail "lock_busy"
+
 [ -r "$KEY_FILE" ] || fail "key_unreadable"
 
 # H13: the database password lives ONLY inside this function's scope (local

@@ -24,8 +24,10 @@ ALERTS=""
 add_alert() { ALERTS="$ALERTS$1\n"; }
 
 # 1. Container health.
+# L8: match "(healthy)" exactly — a naive `healthy` substring also matches
+# "(unhealthy)", silently dropping the containers that need alerting.
 UNHEALTHY="$(docker ps --filter "label=com.docker.compose.project=$COMPOSE_PROJECT" \
-  --format '{{.Names}} {{.Status}}' | grep -v healthy || true)"
+  --format '{{.Names}} {{.Status}}' | grep -v '(healthy)' || true)"
 [ -n "$UNHEALTHY" ] && add_alert "unhealthy_containers: $UNHEALTHY"
 
 # 2. Disk space.
