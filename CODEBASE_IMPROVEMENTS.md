@@ -1037,6 +1037,18 @@ Most important areas requiring attention:
   `CREATE INDEX CONCURRENTLY` in separate tx, `WHERE … IS NULL` guards, migrator
   advisory lock.
 - **Suggested validation:** Re-run migrations twice in CI; concurrent-boot test.
+- **Status: Completed 2026-09-08** — every migration re-applies cleanly
+  (IF NOT EXISTS / DROP IF EXISTS / ON CONFLICT / COALESCE guards across
+  0001/0002/0003/0004/0005/0006/0007; 0008 already guarded); migrator takes
+  the `careerpilot-migrator` advisory lock BEFORE creating
+  schema_migrations on one dedicated connection; default migrations path
+  uses fileURLToPath (was broken on Windows hosts). Proven: full double
+  raw re-apply with ON_ERROR_STOP=1 clean, plus 3 concurrent Linux
+  migrator runs on a fresh DB → exactly one applier, two
+  `migrations_up_to_date` no-ops (first attempt caught the winner's
+  CREATE TABLE race, fixed by lock-first ordering). Note: 0005's landed
+  index rebuild stays as-is (already applied); future index work goes
+  CONCURRENTLY outside a tx per the 0008 header note.
 
 ### L6. Docker images: JIT TS in prod, `npm install`, missing ignores, floating tags
 

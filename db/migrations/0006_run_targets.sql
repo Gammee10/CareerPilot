@@ -2,4 +2,4 @@
 -- Truthful completion is computed from authoritative attempt records versus
 -- the set of sources actually targeted for the run — not from queue state.
 
-ALTER TABLE discovery_runs ADD COLUMN targeted_sources jsonb NOT NULL DEFAULT '[]'::jsonb;
+ALTER TABLE discovery_runs ADD COLUMN IF NOT EXISTS targeted_sources jsonb NOT NULL DEFAULT '[]'::jsonb;

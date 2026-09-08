@@ -1,4 +1,5 @@
 import fs from "node:fs";
+import { fileURLToPath } from "node:url";
 
 const SECRETS_DIR = "/run/secrets";
 
@@ -15,7 +16,9 @@ export const config = {
     passwordSecretName: "postgres_password"
   },
   migrationsDir:
-    process.env.MIGRATIONS_DIR ?? new URL("../../../db/migrations", import.meta.url).pathname,
+    // L5: fileURLToPath (not .pathname) so the default resolves on Windows
+    // dev machines as well as Linux containers; MIGRATIONS_DIR overrides.
+    process.env.MIGRATIONS_DIR ?? fileURLToPath(new URL("../../../db/migrations", import.meta.url)),
   // ADR-026/027 accepted policy values. Tests may override via env, never in production.
   identity: {
     signinLinkTtlMinutes: Number(process.env.SIGNIN_LINK_TTL_MINUTES ?? 15),

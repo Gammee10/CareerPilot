@@ -16,7 +16,8 @@ CREATE EXTENSION IF NOT EXISTS citext;
 
 -- Rejects mutation of append-only rows. DELETE is permitted only inside a
 -- transaction explicitly marked as the retention sweep; UPDATE never.
-CREATE FUNCTION forbid_mutation() RETURNS trigger
+-- L5: re-runnable (CREATE OR REPLACE + DROP TRIGGER IF EXISTS guards).
+CREATE OR REPLACE FUNCTION forbid_mutation() RETURNS trigger
 LANGUAGE plpgsql AS $$
 BEGIN
   IF TG_OP = 'UPDATE' THEN
@@ -36,7 +37,7 @@ END $$;
 -- Accounts, identity, governance (domain-model §Account/Access/Governance)
 -- ---------------------------------------------------------------------------
 
-CREATE TABLE accounts (
+CREATE TABLE IF NOT EXISTS accounts (
   id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
   email citext NOT NULL UNIQUE,
   state text NOT NULL CHECK (state IN ('active','suspended','closed')),
@@ -50,7 +51,7 @@ CREATE TABLE accounts (
     CHECK ((state = 'suspended') = (suspended_at IS NOT NULL))
 );
 
-CREATE TABLE invitations (
+CREATE TABLE IF NOT EXISTS invitations (
   id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
   email citext NOT NULL,
   token_hash text NOT NULL UNIQUE,           -- opaque token stored hashed only
@@ -61,9 +62,9 @@ CREATE TABLE invitations (
   accepted_at timestamptz,
   revoked_at timestamptz
 );
-CREATE INDEX invitations_email_idx ON invitations(email);
+CREATE INDEX IF NOT EXISTS invitations_email_idx ON invitations(email);
 
-CREATE TABLE sessions (
+CREATE TABLE IF NOT EXISTS sessions (
   id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
   account_id uuid NOT NULL REFERENCES accounts(id),
   role text NOT NULL DEFAULT 'user' CHECK (role IN ('user','admin')),
@@ -74,9 +75,9 @@ CREATE TABLE sessions (
   idle_expires_at timestamptz NOT NULL,      -- ADR-027: 7d user / 1h admin
   revoked_at timestamptz                     -- set immediately on suspension/closure
 );
-CREATE INDEX sessions_account_idx ON sessions(account_id);
+CREATE INDEX IF NOT EXISTS sessions_account_idx ON sessions(account_id);
 
-CREATE TABLE administrator_role_changes (
+CREATE TABLE IF NOT EXISTS administrator_role_changes (
   id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
   target_account_id uuid NOT NULL REFERENCES accounts(id),
   action text NOT NULL CHECK (action IN ('grant','revoke')),
@@ -91,7 +92,7 @@ CREATE TABLE administrator_role_changes (
   CONSTRAINT no_self_approval CHECK (approved_by_account_id IS NULL OR approved_by_account_id <> initiated_by_account_id)
 );
 
-CREATE TABLE exceptional_access_requests (
+CREATE TABLE IF NOT EXISTS exceptional_access_requests (
   id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
   requested_by_account_id uuid NOT NULL REFERENCES accounts(id),
   purpose text NOT NULL,
@@ -105,7 +106,7 @@ CREATE TABLE exceptional_access_requests (
   reviewed_at timestamptz
 );
 
-CREATE TABLE preservation_holds (
+CREATE TABLE IF NOT EXISTS preservation_holds (
   id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
   owned_by_account_id uuid REFERENCES accounts(id),
   data_scope jsonb NOT NULL,
@@ -119,7 +120,7 @@ CREATE TABLE preservation_holds (
 
 -- Audit events: metadata only — raw sensitive payloads are excluded by policy
 -- (ADR-015); this schema cannot store them by design of usage conventions.
-CREATE TABLE audit_events (
+CREATE TABLE IF NOT EXISTS audit_events (
   id bigint GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
   occurred_at timestamptz NOT NULL DEFAULT now(),
   actor_type text NOT NULL CHECK (actor_type IN ('user','admin','system','capability')),
@@ -131,7 +132,8 @@ CREATE TABLE audit_events (
   correlation_id uuid,
   details jsonb NOT NULL DEFAULT '{}'::jsonb
 );
-CREATE INDEX audit_events_occurred_idx ON audit_events(occurred_at);
+CREATE INDEX IF NOT EXISTS audit_events_occurred_idx ON audit_events(occurred_at);
+DROP TRIGGER IF EXISTS audit_events_append_only ON audit_events;
 CREATE TRIGGER audit_events_append_only
   BEFORE UPDATE OR DELETE ON audit_events
   FOR EACH ROW EXECUTE FUNCTION forbid_mutation();
@@ -140,7 +142,7 @@ CREATE TRIGGER audit_events_append_only
 -- Profile and resume processing (domain-model §Profile/Evaluation Versioning)
 -- ---------------------------------------------------------------------------
 
-CREATE TABLE career_profiles (
+CREATE TABLE IF NOT EXISTS career_profiles (
   id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
   account_id uuid NOT NULL UNIQUE REFERENCES accounts(id),
   current_profile_version_id uuid,          -- FK added after profile_versions
@@ -148,7 +150,7 @@ CREATE TABLE career_profiles (
   updated_at timestamptz NOT NULL DEFAULT now()
 );
 
-CREATE TABLE resume_documents (
+CREATE TABLE IF NOT EXISTS resume_documents (
   id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
   account_id uuid NOT NULL REFERENCES accounts(id),
   storage_key text NOT NULL,                -- object reference only; artifact lives in Object Storage (ADR-050)
@@ -159,9 +161,9 @@ CREATE TABLE resume_documents (
   superseded_at timestamptz,                -- start of 30-day grace (ADR-020)
   deleted_at timestamptz                    -- set when removed from active storage
 );
-CREATE INDEX resume_documents_account_idx ON resume_documents(account_id);
+CREATE INDEX IF NOT EXISTS resume_documents_account_idx ON resume_documents(account_id);
 
-CREATE TABLE resume_extraction_drafts (
+CREATE TABLE IF NOT EXISTS resume_extraction_drafts (
   id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
   account_id uuid NOT NULL REFERENCES accounts(id),
   resume_document_id uuid REFERENCES resume_documents(id),  -- null = manual path
@@ -174,7 +176,7 @@ CREATE TABLE resume_extraction_drafts (
 
 -- Immutable snapshot on every save (ADR-005). Hard-constraint vs preference
 -- classification lives inside content jsonb.
-CREATE TABLE profile_versions (
+CREATE TABLE IF NOT EXISTS profile_versions (
   id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
   account_id uuid NOT NULL REFERENCES accounts(id),
   version_number integer NOT NULL CHECK (version_number >= 1),
@@ -183,13 +185,16 @@ CREATE TABLE profile_versions (
   saved_at timestamptz NOT NULL DEFAULT now(),
   UNIQUE (account_id, version_number)
 );
+DROP TRIGGER IF EXISTS profile_versions_append_only ON profile_versions;
 CREATE TRIGGER profile_versions_append_only
   BEFORE UPDATE OR DELETE ON profile_versions
   FOR EACH ROW EXECUTE FUNCTION forbid_mutation();
 
+ALTER TABLE career_profiles DROP CONSTRAINT IF EXISTS career_profiles_current_version_fk;
 ALTER TABLE career_profiles
   ADD CONSTRAINT career_profiles_current_version_fk
   FOREIGN KEY (current_profile_version_id) REFERENCES profile_versions(id);
+ALTER TABLE resume_extraction_drafts DROP CONSTRAINT IF EXISTS drafts_accepted_version_fk;
 ALTER TABLE resume_extraction_drafts
   ADD CONSTRAINT drafts_accepted_version_fk
   FOREIGN KEY (accepted_profile_version_id) REFERENCES profile_versions(id);
@@ -198,7 +203,7 @@ ALTER TABLE resume_extraction_drafts
 -- Shared job data (domain-model §Core Job Model; ADRs 004/006/007/037/038/046)
 -- ---------------------------------------------------------------------------
 
-CREATE TABLE job_sources (
+CREATE TABLE IF NOT EXISTS job_sources (
   slug text PRIMARY KEY CHECK (slug IN ('greenhouse','lever','remoteok','url_import')),
   enabled boolean NOT NULL DEFAULT true,     -- each adapter independently disableable (ADR-059)
   terms_validation_recorded_at timestamptz,  -- T4.0 blocking-precondition evidence
@@ -206,14 +211,15 @@ CREATE TABLE job_sources (
   created_at timestamptz NOT NULL DEFAULT now(),
   updated_at timestamptz NOT NULL DEFAULT now()
 );
-INSERT INTO job_sources(slug) VALUES ('greenhouse'),('lever'),('remoteok'),('url_import');
+INSERT INTO job_sources(slug) VALUES ('greenhouse'),('lever'),('remoteok'),('url_import')
+ON CONFLICT (slug) DO NOTHING;
 
-CREATE TABLE canonical_jobs (
+CREATE TABLE IF NOT EXISTS canonical_jobs (
   id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
   created_at timestamptz NOT NULL DEFAULT now()
 );
 
-CREATE TABLE discovery_runs (
+CREATE TABLE IF NOT EXISTS discovery_runs (
   id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
   account_id uuid NOT NULL REFERENCES accounts(id),
   profile_version_id uuid NOT NULL REFERENCES profile_versions(id),
@@ -227,11 +233,11 @@ CREATE TABLE discovery_runs (
   completed_at timestamptz
 );
 -- ADR-042: at most one active run per user at any time.
-CREATE UNIQUE INDEX one_active_run_per_user
+CREATE UNIQUE INDEX IF NOT EXISTS one_active_run_per_user
   ON discovery_runs(account_id)
   WHERE status IN ('queued','running');
 
-CREATE TABLE source_collection_attempts (
+CREATE TABLE IF NOT EXISTS source_collection_attempts (
   id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
   discovery_run_id uuid NOT NULL REFERENCES discovery_runs(id),
   job_source_slug text NOT NULL REFERENCES job_sources(slug),
@@ -252,7 +258,7 @@ CREATE TABLE source_collection_attempts (
 -- Listing identity: one row per source-specific listing. Current-view fields
 -- below are DERIVED, pipeline-maintained projections of the latest relevant
 -- observations — not independent evidence (ADR-037).
-CREATE TABLE source_listings (
+CREATE TABLE IF NOT EXISTS source_listings (
   id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
   job_source_slug text NOT NULL REFERENCES job_sources(slug),
   external_listing_key text NOT NULL,
@@ -265,10 +271,10 @@ CREATE TABLE source_listings (
   alternative_application_urls jsonb NOT NULL DEFAULT '[]'::jsonb,
   UNIQUE (job_source_slug, external_listing_key)
 );
-CREATE INDEX source_listings_canonical_idx ON source_listings(canonical_job_id);
+CREATE INDEX IF NOT EXISTS source_listings_canonical_idx ON source_listings(canonical_job_id);
 
 -- Immutable, provenance-preserving observations (ADR-037).
-CREATE TABLE source_listing_observations (
+CREATE TABLE IF NOT EXISTS source_listing_observations (
   id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
   source_listing_id uuid NOT NULL REFERENCES source_listings(id),
   collected_by_run_id uuid REFERENCES discovery_runs(id),
@@ -280,16 +286,17 @@ CREATE TABLE source_listing_observations (
 );
 -- Retries must not duplicate observations for the same logical collection,
 -- including collection without a linked run (hence NULLS NOT DISTINCT).
-CREATE UNIQUE INDEX observations_idempotent_idx
+CREATE UNIQUE INDEX IF NOT EXISTS observations_idempotent_idx
   ON source_listing_observations(source_listing_id, collected_by_run_id, content_hash)
   NULLS NOT DISTINCT;
+DROP TRIGGER IF EXISTS source_listing_observations_append_only ON source_listing_observations;
 CREATE TRIGGER source_listing_observations_append_only
   BEFORE UPDATE OR DELETE ON source_listing_observations
   FOR EACH ROW EXECUTE FUNCTION forbid_mutation();
 
 -- Non-destructive reconciliation records (ADR-038): both identities retained;
 -- historical evaluations/reviews are never rewritten.
-CREATE TABLE canonical_job_reconciliations (
+CREATE TABLE IF NOT EXISTS canonical_job_reconciliations (
   id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
   action text NOT NULL CHECK (action IN ('merge','split')),
   from_canonical_job_id uuid NOT NULL REFERENCES canonical_jobs(id),
@@ -301,7 +308,7 @@ CREATE TABLE canonical_job_reconciliations (
 );
 
 -- Evidence-weighted availability history (ADR-046). Absence never writes a row.
-CREATE TABLE availability_history (
+CREATE TABLE IF NOT EXISTS availability_history (
   id bigint GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
   canonical_job_id uuid NOT NULL REFERENCES canonical_jobs(id),
   source_listing_id uuid REFERENCES source_listings(id),   -- null = canonical-level inference
@@ -311,7 +318,8 @@ CREATE TABLE availability_history (
      'freshness_window_uncertain','observation_active','restored')),
   recorded_at timestamptz NOT NULL DEFAULT now()
 );
-CREATE INDEX availability_history_job_idx ON availability_history(canonical_job_id, recorded_at);
+CREATE INDEX IF NOT EXISTS availability_history_job_idx ON availability_history(canonical_job_id, recorded_at);
+DROP TRIGGER IF EXISTS availability_history_append_only ON availability_history;
 CREATE TRIGGER availability_history_append_only
   BEFORE UPDATE OR DELETE ON availability_history
   FOR EACH ROW EXECUTE FUNCTION forbid_mutation();
@@ -320,14 +328,14 @@ CREATE TRIGGER availability_history_append_only
 -- Search strategy, evaluations, reviews
 -- ---------------------------------------------------------------------------
 
-CREATE TABLE search_strategy (
+CREATE TABLE IF NOT EXISTS search_strategy (
   account_id uuid PRIMARY KEY REFERENCES accounts(id),
   source_targeting jsonb NOT NULL DEFAULT '{}'::jsonb,   -- enabled sources / targeting prefs
   disabled_sources jsonb NOT NULL DEFAULT '[]'::jsonb,
   updated_at timestamptz NOT NULL DEFAULT now()
 );
 
-CREATE TABLE search_terms (
+CREATE TABLE IF NOT EXISTS search_terms (
   id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
   account_id uuid NOT NULL REFERENCES accounts(id),
   term text NOT NULL,
@@ -336,12 +344,12 @@ CREATE TABLE search_terms (
   created_at timestamptz NOT NULL DEFAULT now(),
   updated_at timestamptz NOT NULL DEFAULT now()
 );
-CREATE INDEX search_terms_account_idx ON search_terms(account_id);
+CREATE INDEX IF NOT EXISTS search_terms_account_idx ON search_terms(account_id);
 
 -- Immutable evaluation snapshots (ADR-013). Each ties to its exact inputs:
 -- profile version + job observation + matching-policy version. AI-derived
 -- content persists here only after Node-side validation (ADR-054).
-CREATE TABLE evaluations (
+CREATE TABLE IF NOT EXISTS evaluations (
   id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
   account_id uuid NOT NULL REFERENCES accounts(id),
   canonical_job_id uuid NOT NULL REFERENCES canonical_jobs(id),
@@ -358,12 +366,13 @@ CREATE TABLE evaluations (
   superseded boolean NOT NULL DEFAULT false,
   created_at timestamptz NOT NULL DEFAULT now()
 );
-CREATE INDEX evaluations_user_job_idx ON evaluations(account_id, canonical_job_id, created_at DESC);
+CREATE INDEX IF NOT EXISTS evaluations_user_job_idx ON evaluations(account_id, canonical_job_id, created_at DESC);
+DROP TRIGGER IF EXISTS evaluations_append_only ON evaluations;
 CREATE TRIGGER evaluations_append_only
   BEFORE UPDATE OR DELETE ON evaluations
   FOR EACH ROW EXECUTE FUNCTION forbid_mutation();
 
-CREATE TABLE user_job_reviews (
+CREATE TABLE IF NOT EXISTS user_job_reviews (
   id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
   account_id uuid NOT NULL REFERENCES accounts(id),
   canonical_job_id uuid NOT NULL REFERENCES canonical_jobs(id),
@@ -376,7 +385,7 @@ CREATE TABLE user_job_reviews (
 
 -- Background-work idempotency (ADR-045): re-delivery of the same logical work
 -- yields at most one persisted outcome per idempotency identity.
-CREATE TABLE idempotency_records (
+CREATE TABLE IF NOT EXISTS idempotency_records (
   idempotency_key text PRIMARY KEY,
   work_type text NOT NULL,
   outcome jsonb,
