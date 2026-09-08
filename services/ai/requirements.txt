@@ -3,7 +3,7 @@
 # arrive in later phases behind the Node-owned background-work path.
 
 fastapi==0.115.*
-uvicorn==0.34.*
+uvicorn==0.52.*
 # O5: pydantic is imported directly by main.py — a direct dependency, not
 # a transitive one. Production installs the hashed requirements.lock.
 pydantic==2.*
