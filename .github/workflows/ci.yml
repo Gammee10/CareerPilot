@@ -72,8 +72,11 @@ jobs:
         run: npm run lint
       - name: Type-check
         run: npm run typecheck
+      - name: Tests (M12/H14 helper suites)
+        run: npm test
       - name: Build
         run: npm run build
+
       - name: Dependency audit (advisory — next@15 carries postcss/sharp HIGHs; fix rides the next@16 Dependabot PR)
         continue-on-error: true
         run: npm audit --omit=dev --audit-level=high

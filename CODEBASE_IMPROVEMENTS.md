@@ -919,6 +919,14 @@ Most important areas requiring attention:
   the token.
 - **Suggested validation:** Frontend tests (offline → error state, failed POST →
   rollback); manual double-click test.
+- **Status: Completed 2026-09-08** — `lib/api.ts` rewritten to a never-throw
+  `ApiResult` (15s timeout, JSON guard, 401 → /signin redirect); dashboard
+  actions carry pending flags (buttons disable, no double-submit), error
+  alerts with rollback-by-reload, no optimistic success (acknowledge marks
+  only on ok; refresh distinguishes rejected/queued/failed); signin/closure
+  guard double-submit, handle network failure, and strip the single-use
+  token from the URL once consumed (kept on network failure for retry).
+  Tests: 6 `api()` cases + CI runs `npm test`. Lint/typecheck/build green.
 
 ### M13. Frontend accessibility, encoding, and React-correctness gaps
 

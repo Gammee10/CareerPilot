@@ -45,14 +45,22 @@ export default function Dashboard() {
   const [strategy, setStrategy] = useState<Strategy | null>(null);
   const [disclosures, setDisclosures] = useState<Record<string, boolean>>({});
   const [notice, setNotice] = useState<string | null>(null);
+  // M12: error outcomes are surfaced (never silent) and every mutating
+  // action tracks its in-flight state so buttons cannot double-submit.
+  const [actionError, setActionError] = useState<string | null>(null);
+  const [pending, setPending] = useState<Record<string, boolean>>({});
+
+  function markPending(key: string, value: boolean) {
+    setPending((p) => ({ ...p, [key]: value }));
+  }
 
   const loadJobs = useCallback(async (accountId: string) => {
     const r = await api<{ jobs: JobItem[] }>(`/account/${accountId}/jobs`);
-    if (r.status === 200 && r.body) setJobs(r.body.jobs);
+    if (r.ok && r.body) setJobs(r.body.jobs);
     const s = await api<DiscoveryStatus>(`/account/${accountId}/discovery/status`);
-    if (s.status === 200) setStatus(s.body as DiscoveryStatus);
+    if (s.ok) setStatus(s.body as DiscoveryStatus);
     const st = await api<Strategy>(`/account/${accountId}/search-strategy`);
-    if (st.status === 200) setStrategy(st.body as Strategy);
+    if (st.ok && st.body) setStrategy(st.body);
   }, []);
 
   useEffect(() => {
@@ -71,71 +79,104 @@ export default function Dashboard() {
   }, [loadJobs]);
 
   async function acknowledge(key: string) {
-    if (!me) return;
-    await api(`/account/${me.accountId}/disclosures/acknowledge`, {
+    if (!me || pending[`ack:${key}`]) return;
+    markPending(`ack:${key}`, true);
+    setActionError(null);
+    const r = await api(`/account/${me.accountId}/disclosures/acknowledge`, {
       method: "POST",
       body: JSON.stringify({ disclosureKey: key })
     });
-    setDisclosures((d) => ({ ...d, [key]: true }));
+    markPending(`ack:${key}`, false);
+    // No optimistic update: the acknowledgement is marked only on success.
+    if (r.ok) setDisclosures((d) => ({ ...d, [key]: true }));
+    else setActionError("Acknowledgement could not be recorded. Please try again.");
   }
 
   async function refreshNow() {
-    if (!me) return;
+    if (!me || pending.refresh) return;
+    markPending("refresh", true);
+    setNotice(null);
+    setActionError(null);
     const r = await api<{ state?: string; nextEligibleAt?: string }>(
       `/account/${me.accountId}/discovery/refresh`,
       { method: "POST", body: JSON.stringify({}) }
     );
-    if (r.body && "state" in r.body && r.body.state === "rejected_min_interval") {
+    markPending("refresh", false);
+    if (r.ok && r.body && "state" in r.body && r.body.state === "rejected_min_interval") {
       setNotice(`Refresh available after ${new Date(String(r.body.nextEligibleAt)).toLocaleTimeString()}`);
-    } else {
+    } else if (r.ok) {
       setNotice("Discovery queued.");
+    } else {
+      setActionError("Refresh could not be queued. Please try again.");
     }
     await loadJobs(me.accountId);
   }
 
   async function review(jobId: string, state: string) {
-    if (!me) return;
-    await api(`/account/${me.accountId}/jobs/${jobId}/review`, {
+    if (!me || pending[`review:${jobId}`]) return;
+    markPending(`review:${jobId}`, true);
+    setActionError(null);
+    const r = await api(`/account/${me.accountId}/jobs/${jobId}/review`, {
       method: "POST",
       body: JSON.stringify({ state })
     });
+    markPending(`review:${jobId}`, false);
+    if (!r.ok) {
+      setActionError("Review could not be saved. Please try again.");
+      return;
+    }
     await loadJobs(me.accountId);
   }
 
   async function toggleGenerated(term: string, enabled: boolean) {
-    if (!me) return;
+    if (!me || pending[`term:${term}`]) return;
+    markPending(`term:${term}`, true);
+    setActionError(null);
     const r = await api<Strategy>(`/account/${me.accountId}/search-strategy`, {
       method: "PUT",
       body: JSON.stringify({ enableGenerated: [{ term, enabled }] })
     });
-    if (r.status === 200 && r.body) setStrategy(r.body);
+    markPending(`term:${term}`, false);
+    // Roll back on failure by reloading the authoritative strategy.
+    if (r.ok && r.body) setStrategy(r.body);
+    else {
+      setActionError("Search-strategy change could not be saved. Reloading.");
+      await loadJobs(me.accountId);
+    }
   }
 
   async function requestClosure() {
-    if (!me) return;
+    if (!me || pending.closure) return;
+    markPending("closure", true);
+    setNotice(null);
+    setActionError(null);
     // The fresh purpose-bound link is delivered by email; the dashboard only
     // reports that the confirmation step was sent.
     const r = await api(`/account/${me.accountId}/closure/request`, { method: "POST", body: "{}" });
-    setNotice(
-      r.status === 202
-        ? "Closure confirmation link sent. Check your email â€” access continues until you confirm."
-        : "Closure request could not be processed."
-    );
+    markPending("closure", false);
+    if (r.status === 202) {
+      setNotice("Closure confirmation link sent. Check your email. Access continues until you confirm.");
+    } else {
+      setActionError("Closure request could not be processed. Please try again.");
+    }
   }
 
   async function loadDetail(jobId: string): Promise<JobDetail> {
     if (detail[jobId]) return detail[jobId] as JobDetail;
     const r = await api<JobDetail>(`/account/${me!.accountId}/jobs/${jobId}/detail`);
-    const d = r.body as JobDetail;
+    if (!r.ok || !r.body) throw new Error("detail_unavailable");
+    const d = r.body;
     setDetail((prev) => ({ ...prev, [jobId]: d }));
     return d;
   }
 
   function DetailRow({ jobId }: { jobId: string }) {
     const [d, setD] = useState<JobDetail | null>((detail[jobId] as JobDetail) ?? null);
+    const [failed, setFailed] = useState(false);
     useEffect(() => {
-      loadDetail(jobId).then(setD).catch(() => undefined);
+      loadDetail(jobId).then(setD).catch(() => setFailed(true));
     }, [jobId]);
+    if (failed) return <p role="alert">Job detail could not be loaded.</p>;
     if (!d) return <p>Loading detailâ€¦</p>;
     return (
       <div style={{ background: "#f6f6f6", padding: "0.75rem", marginTop: "0.5rem" }}>
@@ -194,12 +235,12 @@ export default function Dashboard() {
         <br />
         <button onClick={() => setOpen(!open)}>{open ? "Hide details" : "Why this job?"}</button>{" "}
         {item.reviewState === "new" && (
-          <button onClick={() => review(item.canonicalJobId, "seen")}>Mark seen</button>
+          <button disabled={!!pending[`review:${item.canonicalJobId}`]} onClick={() => review(item.canonicalJobId, "seen")}>Mark seen</button>
         )}
         {item.reviewState === "seen" && (
           <>
-            <button onClick={() => review(item.canonicalJobId, "saved")}>Save</button>
-            <button onClick={() => review(item.canonicalJobId, "not_interested")}>Not interested</button>
+            <button disabled={!!pending[`review:${item.canonicalJobId}`]} onClick={() => review(item.canonicalJobId, "saved")}>Save</button>
+            <button disabled={!!pending[`review:${item.canonicalJobId}`]} onClick={() => review(item.canonicalJobId, "not_interested")}>Not interested</button>
           </>
         )}
         {open && <DetailRow jobId={item.canonicalJobId} />}
@@ -227,7 +268,7 @@ export default function Dashboard() {
             Your approved profile drives discovery; administrators have no routine access to your
             content; you can request closure at any time.
           </p>
-          <button onClick={() => acknowledge("activation_notice")}>Acknowledge</button>
+          <button disabled={!!pending["ack:activation_notice"]} onClick={() => acknowledge("activation_notice")}>Acknowledge</button>
         </div>
       )}
 
@@ -245,10 +286,15 @@ export default function Dashboard() {
           {a.job_source_slug}: {a.status}
         </small>
       ))}
-      <button onClick={refreshNow}>Refresh now</button>
+      <button disabled={!!pending.refresh} onClick={refreshNow}>{pending.refresh ? "Refreshing…" : "Refresh now"}</button>
       {notice && (
         <p role="status" style={{ color: "#060" }}>
           {notice}
+        </p>
+      )}
+      {actionError && (
+        <p role="alert" style={{ color: "#b00" }}>
+          {actionError}
         </p>
       )}
 
@@ -289,7 +335,7 @@ export default function Dashboard() {
         Closing your account stops access immediately and deletes your data within 30 days.
         You will receive a fresh confirmation link by email.
       </p>
-      <button onClick={requestClosure}>Request account closureâ€¦</button>
+      <button disabled={!!pending.closure} onClick={requestClosure}>Request account closure</button>
     </main>
   );
 }

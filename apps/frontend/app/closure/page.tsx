@@ -10,6 +10,14 @@ export default function ClosurePage() {
     ? new URLSearchParams(window.location.search).get("token")
     : null;
   const [result, setResult] = useState<{ status?: string; deletionNotice?: string } | null>(null);
+  // M12: the destructive action cannot double-submit while in flight.
+  const [redeeming, setRedeeming] = useState(false);
+
+  // M12: strip the single-use token once consumed so it never lingers in
+  // history, logs, or Referer headers. Network failures keep it for retry.
+  function stripToken() {
+    window.history.replaceState(null, "", window.location.pathname);
+  }
 
   useEffect(() => {
     if (!token) {
@@ -17,29 +25,44 @@ export default function ClosurePage() {
       return;
     }
     (async () => {
-      const confirm = await fetch("/api/auth/closure/confirm", {
-        method: "POST",
-        headers: { "content-type": "application/json" },
-        body: JSON.stringify({ token })
-      });
-      if (confirm.status === 200) setState("confirm");
-      else setState("failed");
+      try {
+        const confirm = await fetch("/api/auth/closure/confirm", {
+          method: "POST",
+          headers: { "content-type": "application/json" },
+          body: JSON.stringify({ token })
+        });
+        if (confirm.status === 200) setState("confirm");
+        else {
+          stripToken();
+          setState("failed");
+        }
+      } catch {
+        setState("failed");
+      }
     })();
   }, [token]);
 
   async function redeem() {
-    if (!token) return;
-    const res = await fetch("/api/auth/closure/redeem", {
-      method: "POST",
-      headers: { "content-type": "application/json" },
-      body: JSON.stringify({ token })
-    });
-    const body = await res.json().catch(() => null);
-    if (res.status === 200) {
-      setResult(body);
-      setState("done");
-    } else {
+    if (!token || redeeming) return;
+    setRedeeming(true);
+    try {
+      const res = await fetch("/api/auth/closure/redeem", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ token })
+      });
+      stripToken();
+      const body = await res.json().catch(() => null);
+      if (res.status === 200) {
+        setResult(body);
+        setState("done");
+      } else {
+        setState("failed");
+      }
+    } catch {
       setState("failed");
+    } finally {
+      setRedeeming(false);
     }
   }
 
@@ -53,8 +76,8 @@ export default function ClosurePage() {
             Warning: closing your account is permanent. Access stops immediately and
             your data will be deleted within 30 days. This cannot be undone.
           </p>
-          <button onClick={redeem} style={{ background: "#b00", color: "#fff", padding: "0.6rem 1.2rem" }}>
-            Close my account permanently
+          <button disabled={redeeming} onClick={redeem} style={{ background: "#b00", color: "#fff", padding: "0.6rem 1.2rem" }}>
+            {redeeming ? "Closing…" : "Close my account permanently"}
           </button>
         </>
       )}
