@@ -91,7 +91,13 @@ echo "INSERT INTO audit_events (actor_type, action, outcome, target_category, ta
 
 echo "== Upload round-trip verification (H12) =="
 FAKE_BUCKET="$ROOT/backups-test/fake-bucket"
-mkdir -p "$FAKE_BUCKET"
+# Created inside the test container on purpose: backups-test/ itself is
+# root-owned (backup.sh's mkdir runs as container root), so a host-side
+# mkdir fails with Permission denied on Linux — exactly the CI #41-43
+# failure ("mkdir: cannot create directory ... Permission denied" ~5s in).
+# Host-side reads ([ -f ], sha256sum) work fine on root-owned paths.
+docker exec "$PGC" mkdir -p /repo/backups-test/fake-bucket \
+  || { echo "FAILED: fake-bucket setup"; exit 1; }
 # Happy path: fake bucket stores the object; re-download hash must match.
 docker exec \
   -e PGHOST=localhost -e PGPORT=5432 -e PGUSER=postgres -e PGDATABASE=backupdb \
@@ -156,9 +162,17 @@ echo "$DRILL_OUT" | grep -q "closed_accounts_after_replay=1" \
 
 
 echo "== Integrity-failure path (tampered artifact) =="
-cp "$ARTIFACT" "$ROOT/backups-test/tampered.dump.enc"
-cp "$ARTIFACT.sha256" "$ROOT/backups-test/tampered.dump.enc.sha256"
-printf 'X' | dd of="$ROOT/backups-test/tampered.dump.enc" bs=1 seek=5 conv=notrunc 2>/dev/null
+# All writes go through the container (root): backups-test/ is root-owned,
+# so host-side cp/dd would fail with Permission denied on Linux, and a
+# silently-missing tampered file would make this negative test pass for the
+# wrong reason — hence the guarded setup.
+TAMPER_BASE="tampered.dump.enc"
+docker exec "$PGC" cp "/repo/backups-test/$(basename "$ARTIFACT")" "/repo/backups-test/$TAMPER_BASE" \
+  || { echo "FAILED: tamper setup (copy)"; exit 1; }
+docker exec "$PGC" cp "/repo/backups-test/$(basename "$ARTIFACT").sha256" "/repo/backups-test/$TAMPER_BASE.sha256" \
+  || { echo "FAILED: tamper setup (manifest)"; exit 1; }
+docker exec "$PGC" dd if=/dev/zero of="/repo/backups-test/$TAMPER_BASE" bs=1 seek=5 count=1 conv=notrunc >/dev/null 2>&1 \
+  || { echo "FAILED: tamper setup (modify)"; exit 1; }
 if BACKUP_ENCRYPTION_KEY_FILE=/tmp/missing.key \
    DRILL_CONTAINER="careerpiot-tamper-drill" \
    bash "$ROOT/ops/restore-drill.sh" "$ROOT/backups-test/tampered.dump.enc" 2>/dev/null; then
@@ -169,6 +183,8 @@ fi
 rm -f "$ROOT/.drill-key.tmp"
 echo "Integrity failure correctly detected on tampered artifact."
 
-rm -rf "$ROOT/backups-test"
+# Cleanup as container root: the whole tree is root-owned on Linux, so a
+# host-side rm -rf would fail with Permission denied (same CI #41-43 class).
+docker exec "$PGC" rm -rf /repo/backups-test || true
 echo ""
 echo "BACKUP/RESTORE TESTS: PASS (T8.3/T8.4 acceptance demonstrated)"
