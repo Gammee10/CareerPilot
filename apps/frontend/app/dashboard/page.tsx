@@ -307,7 +307,7 @@ export default function Dashboard() {
     );
 
   return (
-    <main style={{ fontFamily: "system-ui", maxWidth: 760, margin: "2rem auto", padding: "0 1rem" }}>
+    <main id="main-content" style={{ fontFamily: "system-ui", maxWidth: 760, margin: "2rem auto", padding: "0 1rem" }}>
       <h1>CareerPilot Dashboard</h1>
 
       {!disclosures["activation_notice"] && (

@@ -90,7 +90,7 @@ function SignInInner() {
   }
 
   return (
-    <main style={{ fontFamily: "system-ui", maxWidth: 480, margin: "4rem auto", padding: "0 1rem" }}>
+    <main id="main-content" style={{ fontFamily: "system-ui", maxWidth: 480, margin: "4rem auto", padding: "0 1rem" }}>
       <h1>Sign in to CareerPilot</h1>
       {token && !message ? (
         <p>Validating your secure link…</p>

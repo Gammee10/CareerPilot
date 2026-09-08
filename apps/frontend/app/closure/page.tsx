@@ -69,7 +69,7 @@ export default function ClosurePage() {
   }
 
   return (
-    <main style={{ fontFamily: "system-ui", maxWidth: 560, margin: "4rem auto", padding: "0 1rem" }}>
+    <main id="main-content" style={{ fontFamily: "system-ui", maxWidth: 560, margin: "4rem auto", padding: "0 1rem" }}>
       <h1>Confirm account closure</h1>
       {state === "working" && <p>Validating your closure link…</p>}
       {state === "confirm" && (

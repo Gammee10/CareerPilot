@@ -1,0 +1,21 @@
+/* O4: keyboard-focus visibility and skip-link styling. Layout is
+   fluid by construction (max-width + padding on every page). */
+
+:focus-visible {
+  outline: 2px solid #005fcc;
+  outline-offset: 2px;
+}
+
+.skip-link {
+  position: absolute;
+  left: -9999px;
+  top: 0;
+  background: #fff;
+  padding: 0.5rem 1rem;
+  z-index: 100;
+}
+
+.skip-link:focus-visible {
+  left: 1rem;
+  top: 1rem;
+}

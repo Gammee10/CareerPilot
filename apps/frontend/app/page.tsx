@@ -17,7 +17,7 @@ export default function HomePage() {
   }, []);
 
   return (
-    <main style={{ fontFamily: "system-ui", maxWidth: 640, margin: "4rem auto", padding: "0 1rem" }}>
+    <main id="main-content" style={{ fontFamily: "system-ui", maxWidth: 640, margin: "4rem auto", padding: "0 1rem" }}>
       <h1>CareerPilot</h1>
       {!checked ? (
         <p>Loading…</p>

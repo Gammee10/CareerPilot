@@ -1219,6 +1219,14 @@ Most important areas requiring attention:
 - **Recommended improvement:** Fill metadata, add error boundary + skip link,
   enable standalone output, add a small design-system pass with focus states.
 - **Suggested validation:** Lighthouse + `axe` scores before/after.
+- **Status: Completed 2026-09-08** — `poweredByHeader: false` and
+  standalone output were already done in L6; this change adds description
+  metadata, explicit viewport, a global error boundary (truthful retryable
+  message), a skip link (every page's `<main id="main-content">`), and a
+  global stylesheet with `:focus-visible` + skip-link styles. `metadataBase`
+  deliberately omitted (no canonical production domain declared yet — set it
+  with the real DOMAIN before listings go public). Lint/typecheck/build
+  green; formal Lighthouse/`axe` pass deferred to pre-launch validation.
 
 ### O5. Dependency hygiene and supply-chain pinning
 
