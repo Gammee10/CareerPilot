@@ -91,6 +91,26 @@ describe("deny-by-default isolation", () => {
     });
   });
 
+  it("L1: malformed session cookies fail closed as 401, never 500", async () => {
+    await withServer(h.app, async (port) => {
+      const users = await setupUsers(port);
+      for (const bad of [
+        "cp_session=%E0%A4%A",
+        "cp_session=%",
+        "cp_session=%%% influenced"
+      ]) {
+        const res = await request(
+          users.port,
+          "GET",
+          `/api/account/${users.accountA}/profile`,
+          { cookie: bad }
+        );
+        expect(res.status).toBe(401);
+        expect(res.body).toEqual({ error: "unauthenticated" });
+      }
+    });
+  });
+
   it("cross-account access returns denial for every protected resource type (T2.6 AC)", async () => {
     await withServer(h.app, async (port) => {
       const users = await setupUsers(port);

@@ -31,7 +31,14 @@ export function extractSessionToken(req: Request): string | null {
   if (cookieHeader) {
     for (const part of cookieHeader.split(";")) {
       const [name, ...rest] = part.trim().split("=");
-      if (name === config.sessionCookieName) return decodeURIComponent(rest.join("="));
+      if (name !== config.sessionCookieName) continue;
+      // L1: malformed cookies (e.g. cp_session=%E0%A4%A) must fail closed
+      // as 401, never throw into the generic 500 handler.
+      try {
+        return decodeURIComponent(rest.join("="));
+      } catch {
+        return null;
+      }
     }
   }
   return null;

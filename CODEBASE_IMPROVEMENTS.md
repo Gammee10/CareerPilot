@@ -996,6 +996,10 @@ Most important areas requiring attention:
   bypassing the 401 path into the generic 500 handler.
 - **Recommended improvement:** Wrap in try/catch → 401.
 - **Suggested validation:** Test with malformed cookie → 401, never 500.
+- **Status: Completed 2026-09-08** — `decodeURIComponent` wrapped in
+  try/catch → null (fails closed into the existing 401 path); covered by a
+  new authorization test with three malformed cookie shapes. Suite 10/10
+  green.
 
 ### L2. Grant tokens in URL path; sign-in token handling inconsistencies
 
