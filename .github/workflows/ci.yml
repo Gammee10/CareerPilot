@@ -208,7 +208,7 @@ jobs:
           docker run --rm -v /var/run/docker.sock:/var/run/docker.sock -v /tmp/sarif:/tmp/sarif aquasec/trivy:0.65.0@sha256:a22415a38938a56c379387a8163fcb0ce38b10ace73e593475d3658d578b2436 image --severity HIGH,CRITICAL --no-progress --exit-code 0 \
             --format sarif --output /tmp/sarif/trivy-backend.sarif careerpilot-backend:ci
       - name: Upload SARIF to code scanning
-        uses: github/codeql-action/upload-sarif@6f5948dfacef28e207b48d0905cf90c03365536d # v3
+        uses: github/codeql-action/upload-sarif@cdf488f595d80d6e07e03d4674febd5ab45fa938 # v4.37.9
         with:
           sarif_file: /tmp/sarif/
       - name: SBOMs (CycloneDX, O5 supply-chain evidence)
