@@ -1016,6 +1016,12 @@ Most important areas requiring attention:
   missing-file error; extend `.env.example` with commented placeholders + pointer
   to `fetch-vault-secrets.sh`.
 - **Suggested validation:** Boot test with missing secret → clear message; doc review.
+- **Status: Completed 2026-09-08** — single `readSecretFile` behind every
+  secret load (`readSecret`, pg-boss password, AI token, Resend key) with an
+  operational missing/empty-file error (ADR-056 pointer, never raw ENOENT);
+  intentional dev/test fallbacks preserved (mailer/AI return null);
+  `.env.example` documents every consumed non-secret variable with defaults
+  and Vault pointers. Tests cover missing/empty/valid loads.
 
 ### L5. Migrations not idempotent / production-unsafe patterns
 

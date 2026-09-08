@@ -2,7 +2,7 @@
 // plus a minimized logging implementation; Resend delivery integration is
 // wired in operations work. Recipient addresses and token URLs are NEVER
 // logged here — only the fact of a send attempt.
-import fs from "node:fs";
+import { readSecretFile } from "../config.js";
 
 export interface Mailer {
   sendInvitation(email: string, url: string): Promise<void>;
@@ -59,14 +59,13 @@ export class ResendMailer implements Mailer {
     from = process.env.EMAIL_FROM ?? "CareerPilot <no-reply@localhost>",
     fetchFn: typeof fetch = fetch
   ): ResendMailer | null {
-    let key = "";
+    // L4: shared reader; absent/empty key means "no Resend" (dev fallback or
+    // production boot refusal in server.ts) — never a raw ENOENT.
     try {
-      key = fs.readFileSync(file, "utf8").trim();
+      return new ResendMailer(readSecretFile(file, "resend_api_key"), from, fetchFn);
     } catch {
       return null;
     }
-    if (!key) return null;
-    return new ResendMailer(key, from, fetchFn);
   }
 
   async sendInvitation(email: string, url: string): Promise<void> {

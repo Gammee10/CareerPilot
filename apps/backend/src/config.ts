@@ -34,5 +34,29 @@ export const config = {
 // Reads a file-mounted Compose secret (ADR-056). Secret values are never
 // logged and never sourced from environment variables.
 export function readSecret(name: string): string {
-  return fs.readFileSync(`${SECRETS_DIR}/${name}`, "utf8").trim();
+  return readSecretFile(`${SECRETS_DIR}/${name}`, name);
+}
+
+/**
+ * L4: single file-secret reader behind every secret load, with an
+ * operational missing-file error (never a raw ENOENT stack). Callers that
+ * must boot without a secret in dev/test (mailer/AI fallbacks) catch this
+ * error deliberately — any other caller treats it as fatal boot config.
+ */
+export function readSecretFile(file: string, label?: string): string {
+  let content: string;
+  try {
+    content = fs.readFileSync(file, "utf8").trim();
+  } catch {
+    throw new Error(
+      `missing secret file: ${file}` +
+      (label ? ` (${label})` : "") +
+      " — mount it as a file-mounted Compose secret" +
+      " (dev: scripts/dev-secrets.*, prod: scripts/fetch-vault-secrets.sh per ADR-056)"
+    );
+  }
+  if (!content) {
+    throw new Error(`empty secret file: ${file}${label ? ` (${label})` : ""}`);
+  }
+  return content;
 }

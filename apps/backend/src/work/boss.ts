@@ -2,8 +2,8 @@
 // approved PostgreSQL system of record. Queue delivery never replaces
 // authoritative domain records — Discovery Run and source-attempt rows
 // remain the source of truth for status (T5.1).
-import fs from "node:fs";
 import Boss from "pg-boss";
+import { readSecretFile } from "../config.js";
 
 export const QUEUES = [
   "extraction",
@@ -22,7 +22,9 @@ let boss: Boss | undefined;
 export function getBoss(): Boss {
   if (!boss) {
     const passwordFile = process.env.PGPASSWORD_FILE ?? "/run/secrets/postgres_password";
-    const password = fs.readFileSync(passwordFile, "utf8").trim();
+    // L4: shared reader — a missing file fails boot with an operational
+    // message, never a raw ENOENT stack.
+    const password = readSecretFile(passwordFile, "postgres_password");
     boss = new Boss({
       host: process.env.PGHOST ?? "postgres",
       port: Number(process.env.PGPORT ?? 5432),

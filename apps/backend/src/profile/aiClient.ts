@@ -1,7 +1,7 @@
 // AI capability client boundary (ADR-047/054). The Node-owned path builds
 // the minimized task, sends it to the internal FastAPI capability, and
 // treats every response as an untrusted proposal until validated here.
-import fs from "node:fs";
+import { readSecretFile } from "../config.js";
 import type { ExtractionTask } from "./minimization.js";
 
 export interface AiClient {
@@ -21,9 +21,10 @@ export class HttpAiClient implements AiClient {
   private resolvedToken(): string | null {
     if (this.internalToken) return this.internalToken;
     // File-mounted Compose secret (ADR-056); absent in dev/test doubles.
+    // L4: shared reader; any failure (missing/empty) means "no token".
     try {
       const file = process.env.AI_INTERNAL_TOKEN_FILE ?? "/run/secrets/ai_internal_token";
-      return fs.readFileSync(file, "utf8").trim() || null;
+      return readSecretFile(file, "ai_internal_token");
     } catch {
       return null;
     }
