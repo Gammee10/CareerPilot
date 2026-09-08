@@ -190,11 +190,13 @@ jobs:
         run: docker run --rm careerpilot-backend:ci sh -c "test -f dist/server.js && test ! -e node_modules/.bin/tsx && echo dist-ok"
       - name: Scan images (report-only, HIGH/CRITICAL table in log)
         run: |
-          docker run --rm -v /var/run/docker.sock:/var/run/docker.sock aquasec/trivy:0.65.0@sha256:a22415a38938a56c379387a8163fcb0ce38b10ace73e593475d3658d578b2436 image --severity HIGH,CRITICAL --no-progress --exit-code 0 \
-            --format sarif --output /tmp/trivy-backend.sarif careerpilot-backend:ci
-          docker run --rm -v /var/run/docker.sock:/var/run/docker.sock aquasec/trivy:0.65.0@sha256:a22415a38938a56c379387a8163fcb0ce38b10ace73e593475d3658d578b2436 image --severity HIGH,CRITICAL --no-progress --exit-code 0 \
-            careerpilot-frontend:ci careerpilot-ai:ci
-          mkdir -p /tmp/sarif && mv /tmp/trivy-backend.sarif /tmp/sarif/
+          mkdir -p /tmp/sarif
+          for img in careerpilot-backend:ci careerpilot-frontend:ci careerpilot-ai:ci; do
+            docker run --rm -v /var/run/docker.sock:/var/run/docker.sock aquasec/trivy:0.65.0@sha256:a22415a38938a56c379387a8163fcb0ce38b10ace73e593475d3658d578b2436 image --severity HIGH,CRITICAL --no-progress --exit-code 0 \
+              "$img"
+          done
+          docker run --rm -v /var/run/docker.sock:/var/run/docker.sock -v /tmp/sarif:/tmp/sarif aquasec/trivy:0.65.0@sha256:a22415a38938a56c379387a8163fcb0ce38b10ace73e593475d3658d578b2436 image --severity HIGH,CRITICAL --no-progress --exit-code 0 \
+            --format sarif --output /tmp/sarif/trivy-backend.sarif careerpilot-backend:ci
       - name: Upload SARIF to code scanning
         uses: github/codeql-action/upload-sarif@6f5948dfacef28e207b48d0905cf90c03365536d # v3
         with:

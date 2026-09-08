@@ -623,6 +623,11 @@ Most important areas requiring attention:
   check, try/catch → unsafe); unit-test with `javascript:`, `data:`, `https:` cases.
 - **Suggested validation:** Frontend unit test on the helper + manual click-through
   with a poisoned fixture.
+- **Status: Completed 2026-09-08** — `lib/urls.ts` `isSafeHttpUrl` (https-only,
+  `new URL` + try/catch); dashboard renders preferred/alternative links only
+  when safe (unsafe → inert text / omitted) with `rel="noopener noreferrer"`;
+  vitest added to the frontend with 3 helper tests green (executable schemes,
+  http downgrade, non-URLs). Lint + typecheck green.
 
 ### H15. Missing FK/operational indexes + dead `superseded` column + GUC-gated deletes
 

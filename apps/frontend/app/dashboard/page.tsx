@@ -2,6 +2,7 @@
 
 import { useCallback, useEffect, useState } from "react";
 import { api } from "../../lib/api";
+import { isSafeHttpUrl } from "../../lib/urls";
 
 type Me = { accountId: string; isAdmin: boolean };
 type JobItem = {
@@ -156,17 +157,23 @@ export default function Dashboard() {
         </ul>
         <p>
           Apply:{" "}
-          <a href={d.preferredApplicationUrl ?? "#"} target="_blank" rel="noreferrer">
-            primary application link
-          </a>
-          {d.alternativeApplicationUrls.map((u) => (
-            <span key={u}>
-              {" Â· "}
-              <a href={u} target="_blank" rel="noreferrer">
-                alternative
-              </a>
-            </span>
-          ))}
+          {isSafeHttpUrl(d.preferredApplicationUrl) ? (
+            <a href={d.preferredApplicationUrl as string} target="_blank" rel="noopener noreferrer">
+              primary application link
+            </a>
+          ) : (
+            <span>primary application link unavailable (unsafe URL)</span>
+          )}
+          {d.alternativeApplicationUrls.map((u) =>
+            isSafeHttpUrl(u) ? (
+              <span key={u}>
+                {" · "}
+                <a href={u} target="_blank" rel="noopener noreferrer">
+                  alternative
+                </a>
+              </span>
+            ) : null
+          )}
           {d.restrictions.length > 0 && <small> Â· source obligations: {d.restrictions.join(", ")}</small>}
         </p>
       </div>
