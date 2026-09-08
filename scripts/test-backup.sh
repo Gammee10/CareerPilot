@@ -60,7 +60,10 @@ echo "INSERT INTO accounts (email, state) VALUES ('pre-backup@example.invalid', 
 echo "phase: seeded"
 
 # Encryption key (capability-scoped secret; production value from OCI Vault).
-docker exec "$PGC" sh -c 'head -c 32 /dev/urandom > /tmp/backup.key'
+# Hex-encoded: raw urandom bytes can start with a newline/NUL, which makes
+# openssl's `-pass file:` read an empty password ("Error getting password").
+docker exec "$PGC" sh -c 'openssl rand -hex 32 > /tmp/backup.key' \
+  || { echo "FAILED: key setup"; exit 1; }
 
 echo "== Running backup pipeline =="
 docker exec \
@@ -108,7 +111,22 @@ docker exec \
   "$PGC" bash /repo/ops/backup.sh || { echo "FAILED: bucketed backup"; exit 1; }
 NEWEST="$(ls -t "$ROOT"/backups-test/careerpilot-*.dump.enc | head -1)"
 BUCKET_COPY="$FAKE_BUCKET/$(basename "$NEWEST")"
-[ -f "$BUCKET_COPY" ] || { echo "FAILED: object never reached the bucket"; exit 1; }
+# Poll, don't single-shot: the container just wrote this object through the
+# bind mount, and host-side visibility can lag one scheduler quantum on some
+# kernels/runners (CI #45/#46 failed a single [ -f ] here while the
+# in-container round-trip inside backup.sh had already hash-verified the very
+# same bytes). Still fail-closed after the budget, with a clear message.
+FOUND=0
+for _ in $(seq 1 10); do
+  if [ -f "$BUCKET_COPY" ]; then FOUND=1; break; fi
+  sleep 1
+done
+if [ "$FOUND" != "1" ]; then
+  echo "FAILED: object never reached the bucket ($BUCKET_COPY)"
+  echo "bucket dir contents:"; ls -la "$FAKE_BUCKET" || true
+  echo "backups dir contents:"; ls -la "$ROOT/backups-test" || true
+  exit 1
+fi
 [ "$(sha256sum "$BUCKET_COPY" | cut -d' ' -f1)" = "$(sha256sum "$NEWEST" | cut -d' ' -f1)" ] \
   || { echo "FAILED: bucket copy differs"; exit 1; }
 echo "bucket round-trip hash matches"
