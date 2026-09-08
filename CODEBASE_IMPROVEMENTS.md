@@ -1245,6 +1245,13 @@ Most important areas requiring attention:
 - **Recommended improvement:** Standard `{data, nextCursor}` envelope, explicit
   `express.json({limit})` + JSON-error middleware → 413/400, DB timestamp triggers.
 - **Suggested validation:** Contract tests on pagination + oversized payload.
+- **Status: Completed (verify-only) 2026-09-08** — the implementable parts
+  already exist and are covered: explicit `express.json({limit:"100kb"})`
+  + JSON-error middleware (413 `payload_too_large`, 400 `invalid_json`),
+  `standardHeaders: true` + explicit `Retry-After` on every 429 path, all
+  asserted in `http-hardening.test.ts` (413 + burst-429 cases). No code
+  change needed. Deliberately deferred: shared `{data, nextCursor}`
+  envelope + `updated_at` triggers (API-wide redesign, suggest follow-up).
 
 ### O4. Accessibility/SEO/responsive polish pass
 
