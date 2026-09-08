@@ -21,6 +21,7 @@ docker run -d --name "$PGC" \
   -e POSTGRES_PASSWORD=test -e POSTGRES_DB=backupdb \
   -v "$ROOT:/repo" \
   postgres:17-alpine >/dev/null
+echo "phase: container-started"
 
 READY=0
 for _ in $(seq 1 60); do
@@ -28,6 +29,7 @@ for _ in $(seq 1 60); do
   sleep 1
 done
 [ "$READY" = "1" ] || { echo "FAILED: test db never ready"; exit 1; }
+echo "phase: postgres-ready"
 
 docker exec "$PGC" apk add --no-cache openssl >/dev/null 2>&1
 # CI reliability: the openssl provisioning above is the only unguarded
@@ -53,7 +55,9 @@ docker exec "$PGC" sh -c '
 
 # Seed one account so the dump has authoritative content.
 echo "INSERT INTO accounts (email, state) VALUES ('pre-backup@example.invalid', 'active');" |
-  docker exec -i "$PGC" psql -U postgres -d backupdb -q
+  docker exec -i "$PGC" psql -U postgres -d backupdb -q \
+  || { echo "FAILED: seed"; exit 1; }
+echo "phase: seeded"
 
 # Encryption key (capability-scoped secret; production value from OCI Vault).
 docker exec "$PGC" sh -c 'head -c 32 /dev/urandom > /tmp/backup.key'
@@ -64,6 +68,7 @@ docker exec \
   -e BACKUP_ENCRYPTION_KEY_FILE=/tmp/backup.key \
   -e BACKUP_DIR=/repo/backups-test \
   "$PGC" bash /repo/ops/backup.sh || { echo "FAILED: backup"; exit 1; }
+echo "phase: first-backup-done"
 
 ARTIFACT="$(ls -t "$ROOT"/backups-test/careerpilot-*.dump.enc | head -1)"
 [ -f "$ARTIFACT" ] || { echo "FAILED: no artifact"; exit 1; }

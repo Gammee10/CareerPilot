@@ -29,7 +29,7 @@
 # =============================================================================
 set -uo pipefail
 
-TS="$(date -u +%Y%m%dT%H%M%SZ)"
+TS="$(date -u +%Y%m%dT%H%M%SZ)-$$"
 BACKUP_DIR="${BACKUP_DIR:-./backups}"
 RETENTION_DAYS="${RETENTION_DAYS:-90}"
 KEY_FILE="${BACKUP_ENCRYPTION_KEY_FILE:?set BACKUP_ENCRYPTION_KEY_FILE}"
@@ -46,18 +46,26 @@ fail() {
 
 [ -r "$KEY_FILE" ] || fail "key_unreadable"
 
-if [ -n "${PGPASSWORD_FILE:-}" ]; then
-  export PGPASSWORD="$(cat "$PGPASSWORD_FILE")"
-fi
+# H13: the database password lives ONLY inside this function's scope (local
+# + export vanishes on return) — never in the script environment where it
+# would be visible via /proc/*/environ to same-user processes.
+dump_database() {
+  if [ -n "${PGPASSWORD_FILE:-}" ]; then
+    local PGPASSWORD
+    PGPASSWORD="$(cat "$PGPASSWORD_FILE")"
+    export PGPASSWORD
+  fi
+  pg_dump -Fc -h "${PGHOST:-localhost}" -p "${PGPORT:-5432}" \
+    -U "${PGUSER:-careerpilot}" -d "${PGDATABASE:-careerpilot}" \
+    -f "$WORK/dump.bin"
+}
 
 WORK="$(mktemp -d)"
 trap 'rm -rf "$WORK"' EXIT
 
 START_MS="$(date +%s%3N)"
 
-pg_dump -Fc -h "${PGHOST:-localhost}" -p "${PGPORT:-5432}" \
-  -U "${PGUSER:-careerpilot}" -d "${PGDATABASE:-careerpilot}" \
-  -f "$WORK/dump.bin" || fail "pg_dump"
+dump_database || fail "pg_dump"
 
 openssl enc -aes-256-cbc -pbkdf2 -iter 600000 -salt \
   -in "$WORK/dump.bin" -out "$WORK/dump.bin.enc" \
