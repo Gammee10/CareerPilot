@@ -36,6 +36,127 @@ type Strategy = {
   transparencyNotice: string;
 };
 
+// M13: hoisted to module scope. Components defined inside the parent
+// re-mount on every parent render (new component identity), wiping their
+// useState (e.g. expanded job details collapse on any refresh).
+function DetailRow({
+  jobId,
+  cached,
+  loadDetail
+}: {
+  jobId: string;
+  cached: JobDetail | undefined;
+  loadDetail: (jobId: string) => Promise<JobDetail>;
+}) {
+  const [d, setD] = useState<JobDetail | null>(cached ?? null);
+  const [failed, setFailed] = useState(false);
+  useEffect(() => {
+    // Cached values are picked up by the initializer on mount; the effect
+    // only fetches, and only from async callbacks (no sync setState).
+    if (cached) return;
+    let cancelled = false;
+    loadDetail(jobId)
+      .then((v) => {
+        if (!cancelled) setD(v);
+      })
+      .catch(() => {
+        if (!cancelled) setFailed(true);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [jobId, cached, loadDetail]);
+  if (failed) return <p role="alert">Job detail could not be loaded.</p>;
+  if (!d) return <p>Loading detail…</p>;
+  return (
+    <div style={{ background: "#f6f6f6", padding: "0.75rem", marginTop: "0.5rem" }}>
+      <p>
+        Eligibility: <strong>{d.eligibility ?? "pending evaluation"}</strong>
+        {d.constraintFailures.map((f) => (
+          <span key={f.constraint}> · excluded: {f.detail}</span>
+        ))}
+      </p>
+      <ul>
+        {d.explanation?.map?.((c: { statement: string; kind: string; confidence: string; evidenceRefs: string[] }, i: number) => (
+          <li key={i}>
+            [{c.kind}/{c.confidence}] {c.statement}
+            {c.evidenceRefs.length > 0 && (
+              <small> ({c.evidenceRefs.map((ref) => `${ref}="${d.evidence[ref]?.value ?? ""}"`).join(", ")})</small>
+            )}
+          </li>
+        ))}
+      </ul>
+      <p>
+        Apply:{" "}
+        {isSafeHttpUrl(d.preferredApplicationUrl) ? (
+          <a href={d.preferredApplicationUrl as string} target="_blank" rel="noopener noreferrer">
+            primary application link
+          </a>
+        ) : (
+          <span>primary application link unavailable (unsafe URL)</span>
+        )}
+        {d.alternativeApplicationUrls.map((u) =>
+          isSafeHttpUrl(u) ? (
+            <span key={u}>
+              {" · "}
+              <a href={u} target="_blank" rel="noopener noreferrer">
+                alternative
+              </a>
+            </span>
+          ) : null
+        )}
+        {d.restrictions.length > 0 && <small> · source obligations: {d.restrictions.join(", ")}</small>}
+      </p>
+    </div>
+  );
+}
+
+function Job({
+  item,
+  reviewPending,
+  onReview,
+  cachedDetail,
+  loadDetail
+}: {
+  item: JobItem;
+  reviewPending: boolean;
+  onReview: (jobId: string, state: string) => void;
+  cachedDetail: JobDetail | undefined;
+  loadDetail: (jobId: string) => Promise<JobDetail>;
+}) {
+  const [open, setOpen] = useState(false);
+  const detailId = `job-detail-${item.canonicalJobId}`;
+  return (
+    <li style={{ marginBottom: "1rem", listStyle: "none", borderBottom: "1px solid #ddd", paddingBottom: "0.75rem" }}>
+      <strong>{item.title ?? "(untitled)"}</strong> — {item.company} · {item.location}
+      <br />
+      <small>
+        score {item.score ?? "—"} · eligibility {item.eligibility ?? "pending"} · availability{" "}
+        {item.availability} · {item.reviewState}
+        {item.pendingReevaluation && " · re-evaluation pending"}
+      </small>
+      <br />
+      <button type="button" aria-expanded={open} aria-controls={detailId} onClick={() => setOpen(!open)}>
+        {open ? "Hide details" : "Why this job?"}
+      </button>{" "}
+      {item.reviewState === "new" && (
+        <button type="button" disabled={reviewPending} onClick={() => onReview(item.canonicalJobId, "seen")}>Mark seen</button>
+      )}
+      {item.reviewState === "seen" && (
+        <>
+          <button type="button" disabled={reviewPending} onClick={() => onReview(item.canonicalJobId, "saved")}>Save</button>
+          <button type="button" disabled={reviewPending} onClick={() => onReview(item.canonicalJobId, "not_interested")}>Not interested</button>
+        </>
+      )}
+      {open && (
+        <div id={detailId}>
+          <DetailRow jobId={item.canonicalJobId} cached={cachedDetail} loadDetail={loadDetail} />
+        </div>
+      )}
+    </li>
+  );
+}
+
 export default function Dashboard() {
   const [me, setMe] = useState<Me | null>(null);
   const [checked, setChecked] = useState(false);
@@ -161,92 +282,20 @@ export default function Dashboard() {
     }
   }
 
-  async function loadDetail(jobId: string): Promise<JobDetail> {
-    if (detail[jobId]) return detail[jobId] as JobDetail;
-    const r = await api<JobDetail>(`/account/${me!.accountId}/jobs/${jobId}/detail`);
-    if (!r.ok || !r.body) throw new Error("detail_unavailable");
-    const d = r.body;
-    setDetail((prev) => ({ ...prev, [jobId]: d }));
-    return d;
-  }
+  const loadDetail = useCallback(
+    async (jobId: string): Promise<JobDetail> => {
+      if (detail[jobId]) return detail[jobId] as JobDetail;
+      // M13: explicit sign-out guard instead of a `me!` crash race.
+      if (!me) throw new Error("signed_out");
+      const r = await api<JobDetail>(`/account/${me.accountId}/jobs/${jobId}/detail`);
+      if (!r.ok || !r.body) throw new Error("detail_unavailable");
+      const d = r.body;
+      setDetail((prev) => ({ ...prev, [jobId]: d }));
+      return d;
+    },
+    [detail, me]
+  );
 
-  function DetailRow({ jobId }: { jobId: string }) {
-    const [d, setD] = useState<JobDetail | null>((detail[jobId] as JobDetail) ?? null);
-    const [failed, setFailed] = useState(false);
-    useEffect(() => {
-      loadDetail(jobId).then(setD).catch(() => setFailed(true));
-    }, [jobId]);
-    if (failed) return <p role="alert">Job detail could not be loaded.</p>;
-    if (!d) return <p>Loading detailâ€¦</p>;
-    return (
-      <div style={{ background: "#f6f6f6", padding: "0.75rem", marginTop: "0.5rem" }}>
-        <p>
-          Eligibility: <strong>{d.eligibility ?? "pending evaluation"}</strong>
-          {d.constraintFailures.map((f) => (
-            <span key={f.constraint}> Â· excluded: {f.detail}</span>
-          ))}
-        </p>
-        <ul>
-          {d.explanation?.map?.((c: { statement: string; kind: string; confidence: string; evidenceRefs: string[] }, i: number) => (
-            <li key={i}>
-              [{c.kind}/{c.confidence}] {c.statement}
-              {c.evidenceRefs.length > 0 && (
-                <small> ({c.evidenceRefs.map((ref) => `${ref}="${d.evidence[ref]?.value ?? ""}"`).join(", ")})</small>
-              )}
-            </li>
-          ))}
-        </ul>
-        <p>
-          Apply:{" "}
-          {isSafeHttpUrl(d.preferredApplicationUrl) ? (
-            <a href={d.preferredApplicationUrl as string} target="_blank" rel="noopener noreferrer">
-              primary application link
-            </a>
-          ) : (
-            <span>primary application link unavailable (unsafe URL)</span>
-          )}
-          {d.alternativeApplicationUrls.map((u) =>
-            isSafeHttpUrl(u) ? (
-              <span key={u}>
-                {" · "}
-                <a href={u} target="_blank" rel="noopener noreferrer">
-                  alternative
-                </a>
-              </span>
-            ) : null
-          )}
-          {d.restrictions.length > 0 && <small> Â· source obligations: {d.restrictions.join(", ")}</small>}
-        </p>
-      </div>
-    );
-  }
-
-  function Job({ item }: { item: JobItem }) {
-    const [open, setOpen] = useState(false);
-    return (
-      <li style={{ marginBottom: "1rem", listStyle: "none", borderBottom: "1px solid #ddd", paddingBottom: "0.75rem" }}>
-        <strong>{item.title ?? "(untitled)"}</strong> â€” {item.company} Â· {item.location}
-        <br />
-        <small>
-          score {item.score ?? "â€”"} Â· eligibility {item.eligibility ?? "pending"} Â· availability{" "}
-          {item.availability} Â· {item.reviewState}
-          {item.pendingReevaluation && " Â· re-evaluation pending"}
-        </small>
-        <br />
-        <button onClick={() => setOpen(!open)}>{open ? "Hide details" : "Why this job?"}</button>{" "}
-        {item.reviewState === "new" && (
-          <button disabled={!!pending[`review:${item.canonicalJobId}`]} onClick={() => review(item.canonicalJobId, "seen")}>Mark seen</button>
-        )}
-        {item.reviewState === "seen" && (
-          <>
-            <button disabled={!!pending[`review:${item.canonicalJobId}`]} onClick={() => review(item.canonicalJobId, "saved")}>Save</button>
-            <button disabled={!!pending[`review:${item.canonicalJobId}`]} onClick={() => review(item.canonicalJobId, "not_interested")}>Not interested</button>
-          </>
-        )}
-        {open && <DetailRow jobId={item.canonicalJobId} />}
-      </li>
-    );
-  }
 
   if (!checked) return <main style={{ fontFamily: "system-ui", margin: "3rem" }}>Loadingâ€¦</main>;
   if (!me)
@@ -268,7 +317,7 @@ export default function Dashboard() {
             Your approved profile drives discovery; administrators have no routine access to your
             content; you can request closure at any time.
           </p>
-          <button disabled={!!pending["ack:activation_notice"]} onClick={() => acknowledge("activation_notice")}>Acknowledge</button>
+          <button type="button" disabled={!!pending["ack:activation_notice"]} onClick={() => acknowledge("activation_notice")}>Acknowledge</button>
         </div>
       )}
 
@@ -286,7 +335,7 @@ export default function Dashboard() {
           {a.job_source_slug}: {a.status}
         </small>
       ))}
-      <button disabled={!!pending.refresh} onClick={refreshNow}>{pending.refresh ? "Refreshing…" : "Refresh now"}</button>
+      <button type="button" disabled={!!pending.refresh} onClick={refreshNow}>{pending.refresh ? "Refreshing…" : "Refresh now"}</button>
       {notice && (
         <p role="status" style={{ color: "#060" }}>
           {notice}
@@ -301,7 +350,14 @@ export default function Dashboard() {
       <h2>New jobs for you</h2>
       <ul style={{ padding: 0 }}>
         {jobs.map((j) => (
-          <Job key={j.canonicalJobId} item={j} />
+          <Job
+            key={j.canonicalJobId}
+            item={j}
+            reviewPending={!!pending[`review:${j.canonicalJobId}`]}
+            onReview={review}
+            cachedDetail={detail[j.canonicalJobId] as JobDetail | undefined}
+            loadDetail={loadDetail}
+          />
         ))}
         {jobs.length === 0 && <li style={{ listStyle: "none" }}>No evaluated jobs yet.</li>}
       </ul>
@@ -335,7 +391,7 @@ export default function Dashboard() {
         Closing your account stops access immediately and deletes your data within 30 days.
         You will receive a fresh confirmation link by email.
       </p>
-      <button disabled={!!pending.closure} onClick={requestClosure}>Request account closure</button>
+      <button type="button" disabled={!!pending.closure} onClick={requestClosure}>Request account closure</button>
     </main>
   );
 }

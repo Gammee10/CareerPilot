@@ -5,11 +5,14 @@ import { useEffect, useState } from "react";
 // Closure confirmation page: the FRESH, purpose-bound link lands here.
 // Two-step (confirm -> redeem) per ADR-036; reuse fails safely.
 export default function ClosurePage() {
-  const [state, setState] = useState<"working" | "confirm" | "ready" | "done" | "failed">("working");
   const token = typeof window !== "undefined"
     ? new URLSearchParams(window.location.search).get("token")
     : null;
-  const [result, setResult] = useState<{ status?: string; deletionNotice?: string } | null>(null);
+  // M13: missing-token failure is the initial state, not a sync setState
+  // inside the effect.
+  const [state, setState] = useState<"working" | "confirm" | "ready" | "done" | "failed">(
+    token ? "working" : "failed"
+  );  const [result, setResult] = useState<{ status?: string; deletionNotice?: string } | null>(null);
   // M12: the destructive action cannot double-submit while in flight.
   const [redeeming, setRedeeming] = useState(false);
 
@@ -20,10 +23,7 @@ export default function ClosurePage() {
   }
 
   useEffect(() => {
-    if (!token) {
-      setState("failed");
-      return;
-    }
+    if (!token) return;
     (async () => {
       try {
         const confirm = await fetch("/api/auth/closure/confirm", {
@@ -76,7 +76,7 @@ export default function ClosurePage() {
             Warning: closing your account is permanent. Access stops immediately and
             your data will be deleted within 30 days. This cannot be undone.
           </p>
-          <button disabled={redeeming} onClick={redeem} style={{ background: "#b00", color: "#fff", padding: "0.6rem 1.2rem" }}>
+          <button type="button" disabled={redeeming} onClick={redeem} style={{ background: "#b00", color: "#fff", padding: "0.6rem 1.2rem" }}>
             {redeeming ? "Closing…" : "Close my account permanently"}
           </button>
         </>

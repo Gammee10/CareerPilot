@@ -1,6 +1,6 @@
 "use client";
 
-import { Suspense, useEffect, useState } from "react";
+import { Suspense, useCallback, useEffect, useState } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 
 function SignInInner() {
@@ -15,9 +15,9 @@ function SignInInner() {
 
   // M12: the single-use token is stripped from the URL as soon as it has
   // been consumed, so it never lingers in history, logs, or Referer headers.
-  function stripToken() {
+  const stripToken = useCallback(() => {
     router.replace("/signin");
-  }
+  }, [router]);
 
   useEffect(() => {
     if (!token) return;
@@ -58,7 +58,7 @@ function SignInInner() {
         setMessage("This sign-in link is invalid or has expired. Request a new one.");
       }
     })();
-  }, [token, router]);
+  }, [token, router, stripToken]);
 
   async function requestLink(e: React.FormEvent) {
     e.preventDefault();
@@ -98,9 +98,12 @@ function SignInInner() {
             link is not enough — you will confirm before access is granted.
           </p>
           <form onSubmit={requestLink}>
+            <label htmlFor="signin-email">Email address</label>
             <input
+              id="signin-email"
               type="email"
               required
+              autoComplete="email"
               value={email}
               onChange={(e) => setEmail(e.target.value)}
               placeholder="you@example.com"
@@ -111,7 +114,7 @@ function SignInInner() {
         </>
       )}
       {message && (
-        <p role="status" style={{ color: error ? "#b00" : "#060" }}>
+        <p role={error ? "alert" : "status"} style={{ color: error ? "#b00" : "#060" }}>
           {message}
         </p>
       )}

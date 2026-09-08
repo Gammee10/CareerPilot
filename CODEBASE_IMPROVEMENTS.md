@@ -945,6 +945,16 @@ Most important areas requiring attention:
   files as UTF-8; add `eslint-plugin-jsx-a11y` + `react-hooks`.
 - **Suggested validation:** `axe` scan, ESLint with a11y plugin, visual check of
   punctuation, interaction test expanding job details after parent re-render.
+- **Status: Completed 2026-09-08** — sign-in email has a real `<label>`,
+  `autoComplete="email"`, error `role="alert"`; dashboard toggles carry
+  `type="button"` + `aria-expanded`/`aria-controls`; `DetailRow`/`Job`
+  hoisted to module scope (expanded state survives parent re-renders);
+  `loadDetail` guards signed-out instead of `me!`; sync setStates moved out
+  of effects; `eslint-plugin-jsx-a11y` + `eslint-plugin-react-hooks`
+  recommended sets enforced (fixed 2 set-state-in-effect errors + 1
+  exhaustive-deps warning). Encoding verified: files are valid UTF-8 with
+  BOM (char-code proof) — the reported mojibake was a viewer artifact, no
+  change needed. Lint/typecheck/tests/build green.
 
 ### M14. AI service hardening gaps: unbounded input, injection shape, upstream mapping
 
