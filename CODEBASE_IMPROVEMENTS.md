@@ -1224,6 +1224,15 @@ Most important areas requiring attention:
   health-check (readyz, queue depth, cert, decrypt-verify, memory/inode), add
   dedup/backoff, and set `mem_limit` + `logging: {max-size, max-file}` per service.
 - **Suggested validation:** Load soak + kill-dependency drills; log-volume measurement.
+- **Status: Completed (bounded) 2026-09-08** — implemented the VM-safety
+  subset: `mem_limit` per service (1g postgres, 512m backend/worker/
+  frontend, 256m ai, 128m caddy) + json-file rotation (10m × 3) on every
+  service; health-check gains backend `readyz` and pg-boss queue-depth
+  (>100 → `queue_backlog_N`) checks, covered by extended stub tests
+  (30/30). Compose config validates; shellcheck clean. Deliberately
+  deferred: Prometheus/OTel metrics + trace propagation (needs dependency
+  + design), cert-expiry checks (Caddy owns ACME), alert dedup/backoff
+  (stateful; suggest follow-up).
 
 ### O3. Pagination, filtering, and response envelope consistency
 

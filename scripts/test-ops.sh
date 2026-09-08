@@ -61,16 +61,24 @@ rm -rf "$ROOT/secrets/prod"
 echo "--- health-check.sh DRY_RUN (stub docker/df) ---"
 cat > "$STUBBIN/docker" <<'EOF'
 #!/usr/bin/env bash
-# $DOCKER_MODE controls behavior: healthy | sick
-if [ "${DOCKER_MODE:-healthy}" = "healthy" ]; then
-  [ "$1" = "ps" ] && echo "careerpilot-backend-1 Up 1 minute (healthy)"
+# Modes: healthy | sick. Sick fails pg_isready + readyz and reports a
+# queue backlog; psql prints the stubbed depth.
+if [ "$1" = "ps" ]; then
+  if [ "${DOCKER_MODE:-healthy}" = "healthy" ]; then
+    echo "careerpilot-backend-1 Up 1 minute (healthy)"
+  else
+    echo "careerpilot-backend-1 Up 1 minute (unhealthy)"
+    echo "careerpilot-worker-1 Up 2 minutes (healthy)"
+  fi
   exit 0
 fi
-if [ "$1" = "ps" ]; then
-  echo "careerpilot-backend-1 Up 1 minute (unhealthy)"
-  echo "careerpilot-worker-1 Up 2 minutes (healthy)"
-elif [ "$1" = "exec" ]; then
-  exit 1
+if [ "$1" = "exec" ]; then
+  shift
+  case "$*" in
+    *psql*) echo "${PGQUEUE_DEPTH:-0}" ;;
+    *pg_isready*|*wget*) [ "${DOCKER_MODE:-healthy}" = "healthy" ] && exit 0 || exit 1 ;;
+  esac
+  exit 0
 fi
 exit 0
 EOF
@@ -96,15 +104,16 @@ else
   bad "health-check healthy exits 0"
 fi
 
-# Sick: unhealthy container, full disk, dead postgres, no backup.
+# Sick: unhealthy container, full disk, dead postgres, dead readyz, queue
+# backlog, no backup.
 rm -f "$BACKUP_DIR"/careerpilot-*.dump.enc
-if DOCKER_MODE=sick DF_PCT=95 DRY_RUN=1 COMPOSE_PROJECT=careerpilot \
+if DOCKER_MODE=sick DF_PCT=95 PGQUEUE_DEPTH=150 DRY_RUN=1 COMPOSE_PROJECT=careerpilot \
     PATH="$STUBBIN:$PATH" bash "$HC" > "$WORK/hc-sick.log" 2>&1; then
   bad "health-check sick exits 1"
 else
   ok "health-check sick exits 1"
 fi
-for code in unhealthy_containers disk_usage_95_pct postgresql_unreachable no_backup_artifact; do
+for code in unhealthy_containers disk_usage_95_pct postgresql_unreachable no_backup_artifact backend_not_ready queue_backlog_150; do
   if grep -q "$code" "$WORK/hc-sick.log"; then ok "health-check alert $code"; else bad "health-check alert $code"; fi
 done
 if grep -q '"dry_run":true' "$WORK/hc-sick.log"; then ok "health-check dry-run envelope"; else bad "health-check dry-run envelope"; fi

@@ -2,7 +2,8 @@
 # =============================================================================
 # VM health check (T8.2, ADR-058). Run from cron on the OCI VM.
 # Checks: containers healthy, disk threshold, PostgreSQL reachable, daily
-# backup present and fresh. Failures produce ONE minimized alert through the
+# backup present and fresh, backend readyz, pg-boss queue depth. Failures
+# produce ONE minimized alert through the
 # Resend alert path (ADR-052 amended scope); alert content carries no user data.
 #
 # Env:
@@ -46,6 +47,21 @@ if [ -z "$LATEST_BACKUP" ]; then
 else
   AGE_H=$(( ( $(date +%s) - $(stat -c %Y "$LATEST_BACKUP") ) / 3600 ))
   [ "$AGE_H" -gt "$MAX_BACKUP_AGE_HOURS" ] && add_alert "backup_stale_${AGE_H}h"
+fi
+
+# 5. O2: backend readyz (DB reachability THROUGH the app, not just the
+#    container) — catches a live backend with a dead database handle.
+docker exec "${COMPOSE_PROJECT}-backend-1" \
+  wget -q -O /dev/null http://127.0.0.1:8080/api/readyz >/dev/null 2>&1 \
+  || add_alert "backend_not_ready"
+
+# 6. O2: pg-boss queue depth — a growing backlog means the worker is stuck
+#    while every other check stays green. Threshold: 100 created jobs.
+QUEUE_DEPTH="$(docker exec "${COMPOSE_PROJECT}-postgres-1" \
+  psql -U careerpilot -d "${POSTGRES_DB:-careerpilot}" -tAc \
+  "SELECT count(*) FROM pgboss.job WHERE state = 'created'" 2>/dev/null | tr -dc '0-9' || true)"
+if [ -n "$QUEUE_DEPTH" ] && [ "$QUEUE_DEPTH" -gt 100 ]; then
+  add_alert "queue_backlog_${QUEUE_DEPTH}"
 fi
 
 send_alert() {

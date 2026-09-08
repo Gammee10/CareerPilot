@@ -40,6 +40,13 @@ services:
   postgres:
     # L6: digest-pinned; bump with .github/dependabot.yml docker updates.
     image: postgres:17-alpine@sha256:18cfe3ef5e6815560c98237d6216d1e5119702fb0f3894c8785dd58b8bbe5d73
+    # O2: cap runaway memory on the single Always Free VM; rotate logs.
+    mem_limit: 1g
+    logging:
+      driver: json-file
+      options:
+        max-size: 10m
+        max-file: "3"
     environment:
       POSTGRES_DB: ${POSTGRES_DB:-careerpilot}
       POSTGRES_USER: ${POSTGRES_USER:-careerpilot}
@@ -64,6 +71,12 @@ services:
       context: .
       dockerfile: apps/backend/Dockerfile
     command: ["node", "dist/tools/migrate.js"]
+    # O2: one-shot task; rotate logs like everything else.
+    logging:
+      driver: json-file
+      options:
+        max-size: 10m
+        max-file: "3"
     environment:
       PGHOST: postgres
       PGPORT: "5432"
@@ -85,6 +98,13 @@ services:
       context: .
       dockerfile: apps/backend/Dockerfile
     command: ["node", "dist/server.js"]
+    # O2: same VM-safety limits as postgres.
+    mem_limit: 512m
+    logging:
+      driver: json-file
+      options:
+        max-size: 10m
+        max-file: "3"
     environment:
       PORT: "8080"
       PGHOST: postgres
@@ -119,6 +139,13 @@ services:
       context: .
       dockerfile: apps/backend/Dockerfile
     command: ["node", "dist/worker/index.js"]
+    # O2: same VM-safety limits as backend.
+    mem_limit: 512m
+    logging:
+      driver: json-file
+      options:
+        max-size: 10m
+        max-file: "3"
     environment:
       WORKER_HEALTH_PORT: "8081"
       PGHOST: postgres
@@ -148,6 +175,13 @@ services:
   ai:
     build:
       context: ./services/ai
+    # O2: same VM-safety limits as backend, smaller for the capability.
+    mem_limit: 256m
+    logging:
+      driver: json-file
+      options:
+        max-size: 10m
+        max-file: "3"
     environment:
       AI_PORT: "8000"
       LOG_LEVEL: ${LOG_LEVEL:-info}
@@ -167,6 +201,13 @@ services:
   frontend:
     build:
       context: ./apps/frontend
+    # O2: same VM-safety limits as backend.
+    mem_limit: 512m
+    logging:
+      driver: json-file
+      options:
+        max-size: 10m
+        max-file: "3"
     environment:
       PORT: "3000"
       # L6: Docker injects HOSTNAME=<container-id>; Next standalone binds to
@@ -191,6 +232,13 @@ services:
   caddy:
     # L6: digest-pinned; bump with .github/dependabot.yml docker updates.
     image: caddy:2-alpine@sha256:5f5c8640aae01df9654968d946d8f1a56c497f1dd5c5cda4cf95ab7c14d58648
+    # O2: the edge proxy is tiny; cap it strictly.
+    mem_limit: 128m
+    logging:
+      driver: json-file
+      options:
+        max-size: 10m
+        max-file: "3"
     environment:
       DOMAIN: ${DOMAIN:-}
     ports:
