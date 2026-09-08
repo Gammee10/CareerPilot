@@ -1285,6 +1285,15 @@ Most important areas requiring attention:
   `tsx` with compiled output, add Dependabot + SBOM (`cyclonedx`) + audit steps.
 - **Suggested validation:** Reproducible `npm ci` + `pip install --require-hashes`
   from clean cache; SBOM artifact in CI.
+- **Status: Completed 2026-09-08** — `requirements.lock` (exact pins +
+  multi-arch hashes, x86_64/aarch64/sdist) generated from the resolved tree;
+  prod image + CI install with `--require-hashes` (proven: clean install +
+  11/11 pytest green); `pydantic` promoted to a direct dependency;
+  `tsx`→dist + digest pins + Dependabot were already done in L6/L7; CI
+  `images` job now emits CycloneDX SBOMs per image as a 30-day artifact.
+  npm `^` ranges remain but are effectively pinned by committed lockfiles
+  (`npm ci` reproducible). Deliberately not done: hash-pinning npm (no
+  native support; lockfile + audit gate is the control).
 
 ---
 

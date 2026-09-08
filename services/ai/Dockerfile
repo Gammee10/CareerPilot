@@ -3,8 +3,9 @@ FROM python:3.12-slim@sha256:78387bc3881b8273120a12ebe6c1ab22b018ccc2c9adf565ae1
 
 WORKDIR /app
 
-COPY requirements.txt .
-RUN pip install --no-cache-dir -r requirements.txt
+COPY requirements.txt requirements.lock .
+# O5: reproducible, hash-verified install — no floating transitives in prod.
+RUN pip install --no-cache-dir --require-hashes -r requirements.lock
 
 COPY main.py .
 
