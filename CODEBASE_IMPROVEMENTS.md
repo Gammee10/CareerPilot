@@ -1096,6 +1096,23 @@ Most important areas requiring attention:
   pin SHAs, set least-privilege permissions and timeouts, split or rename the test job.
 - **Suggested validation:** Workflow dispatch run showing each new step green/red
   appropriately; Dependabot PR on next advisory.
+- **Status: Completed 2026-09-08** — `secrets-scan` (gitleaks full history,
+  proven clean locally: 51 commits, no leaks), backend `npm run build` prod
+  gate + blocking `npm audit` (fixed the one qs moderate via lock-only
+  bump, now 0 vulns), frontend/pip audits advisory with the known cause
+  recorded (next@15 postcss/sharp HIGHs → next@16 Dependabot PR;
+  starlette 0.46.2 PYSEC items need a fastapi minor bump — tried,
+  ResolutionImpossible), new `images` job (builds all 3 prod images,
+  dist/no-tsx smoke check, trivy report-only + SARIF upload), all actions
+  SHA-pinned (Dependabot github-actions covers bumps), top-level
+  `contents: read` + per-job `security-events: write` only for SARIF,
+  `concurrency` cancel, `timeout-minutes` everywhere, `identity` renamed
+  `backend-tests`. Deliberately report-only for trivy: fresh-image scan
+  shows the remaining HIGH/CRITICALs live in base layers (npm-bundled tar
+  in node:22-alpine, debian perl/util-linux in python:3.12-slim) — a
+  blocking gate would be permanently red; verified the earlier tar list
+  was a stale pre-lock-sync image. Coverage thresholds deferred (needs a
+  new dep + baseline; suggest follow-up).
 
 ### L8. Tests: stale truncate list, zero frontend/AI coverage, untested ops paths
 
