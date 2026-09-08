@@ -63,7 +63,7 @@ export async function createDownloadGrant(
 
 export type UploadResult =
   | { ok: true; resumeDocumentId: string; accountId: string }
-  | { ok: false; reason: "invalid_grant" | "unsupported_type" | "too_large" };
+  | { ok: false; reason: "invalid_grant" | "unsupported_type" | "too_large" | "storage_unavailable" };
 
 export async function completeUpload(
   db: Pool,
@@ -81,6 +81,10 @@ export async function completeUpload(
   }
 
   const client = await db.connect();
+  // L3: assigned inside the transaction, consumed by the post-commit write.
+  let accountId = "";
+  let objectKey = "";
+  let resumeDocumentId = "";
   try {
     await client.query("BEGIN");
     // Atomic single-use claim of the grant.
@@ -95,12 +99,13 @@ export async function completeUpload(
       await client.query("ROLLBACK");
       return { ok: false, reason: "invalid_grant" };
     }
-    const accountId = grant.rows[0].account_id;
+    accountId = grant.rows[0].account_id;
 
     // Internal storage key; never exposed externally, never sent to AI.
-    const objectKey = `resumes/${randomBytes(16).toString("hex")}`;
-    await store.put(objectKey, body, contentType);
-
+    objectKey = `resumes/${randomBytes(16).toString("hex")}`;
+    // L3: the bytes are written only AFTER the metadata row commits. A DB
+    // failure therefore cannot orphan sensitive bytes in the store (the old
+    // put-before-INSERT order leaked objects on every INSERT/COMMIT fault).
     const sha256 = createHash("sha256").update(body).digest("hex");
     const inserted = await client.query<{ id: string }>(
       `INSERT INTO resume_documents
@@ -108,13 +113,14 @@ export async function completeUpload(
        VALUES ($1, $2, $3, $4, $5) RETURNING id`,
       [accountId, objectKey, sha256, body.byteLength, contentType]
     );
+    resumeDocumentId = inserted.rows[0].id;
     // Replacement lifecycle (ADR-020/C7): a new upload supersedes all prior
     // raw resumes for the account, starting their 30-day grace period. The
     // freshly uploaded document stays current (superseded_at NULL).
     await client.query(
       `UPDATE resume_documents SET superseded_at = $3
         WHERE account_id = $1 AND id <> $2 AND superseded_at IS NULL`,
-      [accountId, inserted.rows[0].id, now]
+      [accountId, resumeDocumentId, now]
     );
     await recordAudit(client, {
       actorType: "user",
@@ -122,16 +128,28 @@ export async function completeUpload(
       action: "resume.uploaded",
       outcome: "success",
       targetCategory: "resume_document",
-      targetId: inserted.rows[0].id
+      targetId: resumeDocumentId
     });
     await client.query("COMMIT");
-    return { ok: true, resumeDocumentId: inserted.rows[0].id, accountId };
   } catch (err) {
     await client.query("ROLLBACK").catch(() => undefined);
     throw err;
   } finally {
     client.release();
   }
+
+  // Post-commit byte write. On storage failure the metadata row is removed
+  // again (best-effort compensation) so neither an orphan object nor a
+  // dangling row survives; the caller reports 503 and the user retries with
+  // a fresh grant.
+  try {
+    await store.put(objectKey, body, contentType);
+  } catch {
+    await store.delete(objectKey).catch(() => undefined);
+    await db.query("DELETE FROM resume_documents WHERE id = $1", [resumeDocumentId]).catch(() => undefined);
+    return { ok: false, reason: "storage_unavailable" };
+  }
+  return { ok: true, resumeDocumentId, accountId };
 }
 
 export type DownloadResult =
@@ -163,6 +181,19 @@ export async function downloadWithGrant(
       "SELECT storage_key, content_type FROM resume_documents WHERE id = $1",
       [grant.rows[0].resume_document_id]
     );
+    // L3: the document row must exist AND the bytes must be present before
+    // any success is recorded. A missing row previously crashed on
+    // doc.rows[0] AFTER a false success audit; a missing object returned
+    // invalid_grant only after that same false audit.
+    if (doc.rows.length !== 1) {
+      await client.query("ROLLBACK");
+      return { ok: false, reason: "invalid_grant" };
+    }
+    const object = await store.get(doc.rows[0].storage_key);
+    if (!object) {
+      await client.query("ROLLBACK");
+      return { ok: false, reason: "invalid_grant" };
+    }
     await recordAudit(client, {
       actorType: "capability",
       action: "resume.downloaded",
@@ -172,8 +203,6 @@ export async function downloadWithGrant(
     });
     await client.query("COMMIT");
 
-    const object = await store.get(doc.rows[0].storage_key);
-    if (!object) return { ok: false, reason: "invalid_grant" };
     return {
       ok: true,
       body: object.body,

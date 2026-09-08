@@ -505,7 +505,10 @@ export function buildApp(deps: AppDeps): Express {
       nowFn()
     );
     if (!result.ok) {
-      const code = result.reason === "invalid_grant" ? 403 : 415;
+      // L3: storage_unavailable is a transient downstream failure (503),
+      // not a client type error (415).
+      const code =
+        result.reason === "invalid_grant" ? 403 : result.reason === "storage_unavailable" ? 503 : 415;
       res.status(code).json({ error: result.reason });
       return;
     }

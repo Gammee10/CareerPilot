@@ -1031,6 +1031,14 @@ Most important areas requiring attention:
   reconciliation sweep; guard `rows[0]`.
 - **Suggested validation:** Fault-injection tests (DB fail after put → no leak;
   missing object → `invalid_grant`, no success audit).
+- **Status: Completed 2026-09-08** — `completeUpload` writes bytes only after
+  the metadata row commits (DB faults can no longer orphan sensitive bytes);
+  post-commit storage failure compensates best-effort (object + row removed)
+  and surfaces `storage_unavailable` → HTTP 503. `downloadWithGrant`
+  verifies row AND object before any success audit (missing either →
+  rollback + `invalid_grant`, no audit, no TypeError). Tests: storage-fault
+  no-leak/no-dangle + missing-row/missing-object no-audit cases; storage
+  8/8, extraction/drafts/retention 29/29 green.
 
 ### L4. Secret-reading duplicated; config contract incomplete
 

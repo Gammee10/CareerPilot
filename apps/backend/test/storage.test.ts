@@ -207,6 +207,78 @@ describe("scoped resume upload/download", () => {
       expect(attempt.status).toBe(404);
     });
   });
+
+  it("L3: storage failure after commit leaves no orphan object and no dangling row", async () => {
+    const adminId = await createBootstrapAdmin(h.db, "admin3@example.invalid");
+    const user = await createActiveUser(h, "leakprobe@example.invalid", adminId, t0);
+    const { createUploadGrant, completeUpload } = await import("../src/profile/resumes.js");
+    const store = new InMemoryObjectStore();
+    const failingStore = {
+      put: async (): Promise<void> => {
+        throw new Error("bucket on fire");
+      },
+      get: (k: string) => store.get(k),
+      delete: (k: string) => store.delete(k)
+    };
+
+    const grant = await createUploadGrant(h.db, user.accountId, t0);
+    const result = await completeUpload(h.db, failingStore, grant.token, Buffer.from("bytes"), "text/plain", t0);
+    expect(result).toEqual({ ok: false, reason: "storage_unavailable" });
+
+    // No orphan bytes and no dangling metadata row survive.
+    const rows = await h.db.query("SELECT id, storage_key FROM resume_documents WHERE account_id = $1", [user.accountId]);
+    expect(rows.rows).toHaveLength(0);
+  });
+
+  it("L3: download with missing row or missing object fails closed with no success audit", async () => {
+    const adminId = await createBootstrapAdmin(h.db, "admin4@example.invalid");
+    const user = await createActiveUser(h, "auditprobe@example.invalid", adminId, t0);
+    const { createUploadGrant, completeUpload, createDownloadGrant, downloadWithGrant } = await import(
+      "../src/profile/resumes.js"
+    );
+    const store = new InMemoryObjectStore();
+
+    const grant = await createUploadGrant(h.db, user.accountId, t0);
+    const uploaded = await completeUpload(h.db, store, grant.token, Buffer.from("resume bytes"), "text/plain", t0);
+    expect(uploaded.ok).toBe(true);
+    if (!uploaded.ok) return;
+
+    // Case 1: metadata row gone (retention edge) — grant creation itself
+    // refuses unknown documents, and no success audit exists.
+    await h.db.query("DELETE FROM resume_documents WHERE id = $1", [uploaded.resumeDocumentId]);
+    const grant1 = await createDownloadGrant(h.db, user.accountId, uploaded.resumeDocumentId, t0);
+    expect(grant1.ok).toBe(false);
+    const audits1 = await h.db.query(
+      `SELECT id FROM audit_events WHERE action = 'resume.downloaded'
+         AND outcome = 'success' AND target_id = $1`,
+      [uploaded.resumeDocumentId]
+    );
+    expect(audits1.rows).toHaveLength(0);
+
+    // Case 2: row present but bytes missing from the store — previously a
+    // TypeError after a false success audit.
+    const grant2up = await createUploadGrant(h.db, user.accountId, t0);
+    const uploaded2 = await completeUpload(h.db, store, grant2up.token, Buffer.from("more bytes"), "text/plain", t0);
+    expect(uploaded2.ok).toBe(true);
+    if (!uploaded2.ok) return;
+    const key = (
+      await h.db.query<{ storage_key: string }>("SELECT storage_key FROM resume_documents WHERE id = $1", [
+        uploaded2.resumeDocumentId
+      ])
+    ).rows[0].storage_key;
+    await store.delete(key);
+    const dlGrant = await createDownloadGrant(h.db, user.accountId, uploaded2.resumeDocumentId, t0);
+    expect(dlGrant.ok).toBe(true);
+    if (!dlGrant.ok) return;
+    const dl = await downloadWithGrant(h.db, store, dlGrant.token, t0);
+    expect(dl).toEqual({ ok: false, reason: "invalid_grant" });
+    const audits2 = await h.db.query(
+      `SELECT id FROM audit_events WHERE action = 'resume.downloaded'
+         AND outcome = 'success' AND target_id = $1`,
+      [uploaded2.resumeDocumentId]
+    );
+    expect(audits2.rows).toHaveLength(0);
+  });
 });
 
 async function me(port: number, cookie: string): Promise<{ accountId: string }> {
