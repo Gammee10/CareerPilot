@@ -67,10 +67,13 @@ function SignInInner() {
     setError(false);
     setMessage(null);
     try {
+      // L2: normalize client-side (server compares case-insensitively too);
+      // credentials included on every fetch by convention, even anonymous ones.
       const res = await fetch("/api/auth/signin-link", {
         method: "POST",
         headers: { "content-type": "application/json" },
-        body: JSON.stringify({ email })
+        credentials: "include",
+        body: JSON.stringify({ email: email.trim().toLowerCase() })
       });
       if (res.status === 202) {
         setMessage("If the address is registered, a sign-in link is on its way.");

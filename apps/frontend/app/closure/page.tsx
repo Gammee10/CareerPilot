@@ -29,6 +29,7 @@ export default function ClosurePage() {
         const confirm = await fetch("/api/auth/closure/confirm", {
           method: "POST",
           headers: { "content-type": "application/json" },
+          credentials: "include",
           body: JSON.stringify({ token })
         });
         if (confirm.status === 200) setState("confirm");
@@ -49,6 +50,7 @@ export default function ClosurePage() {
       const res = await fetch("/api/auth/closure/redeem", {
         method: "POST",
         headers: { "content-type": "application/json" },
+        credentials: "include",
         body: JSON.stringify({ token })
       });
       stripToken();

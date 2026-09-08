@@ -1010,6 +1010,10 @@ Most important areas requiring attention:
 - **Recommended improvement:** Move grants to header/body (H9); standardize
   `credentials:"include"` on all cookie-authed fetches; normalize email input.
 - **Suggested validation:** Header review + login-flow test with mixed-case email.
+- **Status: Completed 2026-09-08** — grant-header transport was already done
+  in H9 (header-only, covered by `storage.test.ts`); this change standardizes
+  `credentials: "include"` on every signin/closure fetch and normalizes the
+  sign-in email client-side (trim + lowercase). Lint/typecheck green.
 
 ### L3. Orphan objects / false success audits on storage paths
 
