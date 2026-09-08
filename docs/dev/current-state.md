@@ -5,18 +5,29 @@ Last updated: 2026-09-08 (improvement-implementation session — in progress)
 ## Improvement Implementation State (2026-09-07/08)
 
 Working through `CODEBASE_IMPROVEMENTS.md` (51 findings + post-audit X1) one
-improvement per commit, all pushed to `main`. CI green again at run #44.
+improvement per commit, all pushed to `main`. CI green at runs #44 and #47;
+new CI coverage (L7) pending its first run.
 
-- Completed + pushed: C1–C8, H1–H13, H15, H16, M1–M8, M10, M14, O1, X1 (Caddy
-  stripped `/api` prefix — every browser API call 404'd in deployment;
-  fixed + live-verified).
-- CI incident 2026-09-07/08: backup step red on runs #41–43 (root-owned
-  workspace writes from new H12 upload tests vs Linux CI permissions;
-  Windows masked it). Fixed (container-side writes); CI #44 green.
+- Completed + pushed: C1–C8, H1–H13, H15, H16, M1–M8, M10, M14, O1, X1, L4,
+  L5, L6, L7.
+  - L4: single `readSecretFile` behind every secret load (operational
+    missing/empty errors); `.env.example` documents every consumed var.
+  - L5: idempotent migrations (guards everywhere) + lock-first
+    single-flight migrator (caught a real concurrent-boot pg_type race in
+    validation); Windows-host migrate path fixed (fileURLToPath).
+  - L6: precompiled multi-stage images (`node dist`, frontend standalone),
+    `npm ci`, digest pins + Dependabot, per-context dockerignores; full
+    compose stack verified healthy (caught standalone-HOSTNAME bind bug;
+    fixed via `HOSTNAME: 0.0.0.0`).
+  - L7: gitleaks job (history clean), backend build-gate + blocking npm
+    audit (qs fixed, 0 vulns), advisory frontend/pip audits with causes
+    recorded, `images` job (builds + trivy SARIF report-only — residual
+    HIGH/CRITICALs are base-layer), SHA-pinned actions, least-privilege
+    permissions, concurrency, timeouts, `identity` → `backend-tests`.
 - Gate APPROVED status unchanged; re-run relevant ADR-030 evidence rows when
   fixes land (per change, recorded in the report statuses).
-- Remaining per report order: L4–L8, frontend group (H14/M12/M13/L2-remainder/
-  O4), optionals O2/O3/O5. Full suite last green:
+- Remaining per report order: frontend group (H14/M12/M13/L2-remainder/O4),
+  L1, L3, L8, optionals O2/O3/O5. Full suite last green:
   21 files / 221 tests + schema tests + backup suite + AI pytest.
 
 ## Review State (2026-09-07)

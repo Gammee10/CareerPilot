@@ -1,6 +1,34 @@
 ﻿# Session Log
 
-Newest entries first. Append-only — never delete or rewrite prior entries.
+Newest entries first. Append-only - never delete or rewrite prior entries.
+
+---
+
+## 2026-09-08 - Improvement implementation batch 2: L4/L5/L6/L7 (one-per-commit, all pushed)
+
+**Done:** L4 config contract + secret reader (config.test.ts); L5 migration
+idempotency + lock-first single-flight migrator + Windows fileURLToPath fix;
+L6 precompiled multi-stage images, frontend standalone, npm ci, digest pins +
+Dependabot, per-context dockerignores, compose dist commands + HOSTNAME fix;
+L7 hardened CI (gitleaks, build-gate, blocking backend audit with qs fix,
+advisory frontend/pip audits, images+trivy-SARIF job, SHA-pinned actions,
+permissions/concurrency/timeouts, identity renamed backend-tests).
+
+**Verified:** config/mailer + collection/discovery/authorization/signin suites
+green; double raw migration re-apply clean + 3 concurrent Linux migrator runs
+(one applier, two no-ops); all 3 images build; full compose stack healthy with
+public /api/healthz ok + frontend 200; gitleaks 51 commits clean; backend npm
+audit 0 vulns; workflow YAML parsed + image steps replicated locally.
+Stray root package-lock.json (misdirected npm install) removed, tree clean.
+
+**Deviations surfaced:** trivy gate report-only (residual HIGH/CRITICALs are
+base-layer: npm-bundled tar, debian perl/util-linux); in-image HEALTHCHECK +
+tini skipped (compose healthchecks exist; single-process exec-form); coverage
+thresholds deferred; frontend/pip audits advisory (next@15, starlette need
+upstream bumps via Dependabot); 0005's landed index rebuild untouched.
+
+**Next step:** frontend group (H14/M12/M13/L2-remainder/O4), then L1/L3/L8,
+optionals O2/O3/O5.
 
 ---
 
